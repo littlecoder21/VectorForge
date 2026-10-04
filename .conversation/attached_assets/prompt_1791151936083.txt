@@ -1,0 +1,1186 @@
+Build a Professional Smart Image-to-SVG Vectorization & Editing Web App
+
+Create a polished, production-quality web application for converting raster images such as PNG, JPG, and WEBP into clean, editable 2D SVG graphics.
+
+The product should feel like a serious professional creative tool, not a basic file converter.
+
+The core idea is:
+
+Image → Edit/Clean → Smart Vectorize → SVG → Edit SVG → Export
+
+The application should combine an image editor, intelligent raster-to-vector conversion system, SVG editor, and drawing tool into one cohesive interface.
+
+---
+
+1. Product Concept
+
+Build a web app called:
+
+VectorForge
+
+Tagline:
+
+Turn pixels into editable shapes.
+
+The application should allow users to:
+
+- Upload PNG/JPG/WEBP images
+- Remove unwanted backgrounds
+- Erase parts manually
+- Restore erased areas
+- Select colors/regions
+- Clean noisy images
+- Adjust image preprocessing
+- Convert images into SVG
+- Choose different vectorization styles
+- Preview raster and vector versions side-by-side
+- Edit generated SVG elements
+- Draw SVG graphics manually
+- Edit paths and nodes
+- Change fills and strokes
+- Move, scale, rotate, duplicate, and delete elements
+- Simplify complex paths
+- Export the final SVG
+
+Do NOT create a 3D converter.
+
+This is primarily a 2D raster-to-vector and SVG design tool.
+
+---
+
+2. Design Direction
+
+The UI should look like a high-end professional creative application.
+
+Avoid generic AI-generated SaaS styling.
+
+Do NOT make it look like:
+
+- A generic dashboard
+- A simple landing page
+- A basic Bootstrap admin panel
+- A template marketplace website
+- A glassmorphism-heavy AI interface
+
+Instead, take inspiration from professional creative software interfaces while creating an original visual identity.
+
+The interface should feel:
+
+- Precise
+- Technical
+- Premium
+- Minimal
+- Creative
+- Fast
+- Professional
+- Human-designed
+
+Use a dark professional workspace as the primary editor environment.
+
+Use subtle borders, restrained shadows, strong spacing, excellent typography, and carefully designed controls.
+
+Avoid excessive gradients.
+
+Avoid excessive rounded cards.
+
+Avoid huge unnecessary headings inside the editor.
+
+Every UI element should have a functional purpose.
+
+---
+
+3. Application Structure
+
+Create the following main areas:
+
+A. Landing / Welcome Screen
+
+When the user first opens the application, show a clean welcome screen.
+
+Include:
+
+- Logo
+- Product name
+- Short tagline
+- Upload area
+- "Upload Image" button
+- Drag-and-drop support
+- "Start Drawing" option
+- Recent projects section if projects exist
+
+The upload area should feel like a creative workspace rather than a boring file input.
+
+Example:
+
+"Drop an image here"
+
+Supported:
+
+PNG · JPG · WEBP
+
+Secondary action:
+
+"Or choose a file"
+
+---
+
+4. Main Editor Workspace
+
+After uploading an image, transition into the main editor.
+
+Use a professional application layout:
+
+┌──────────────────────────────────────────────────────────────┐
+│ Logo     File   Edit   View                    Undo Redo Export│
+├───────────┬───────────────────────────────────────┬──────────┤
+│           │                                       │          │
+│  TOOLBAR  │            CANVAS / WORKSPACE        │ PROPERTIES│
+│           │                                       │          │
+│ Select    │                                       │ Layers   │
+│ Brush     │                                       │          │
+│ Eraser    │                                       │ Fill     │
+│ Restore   │                                       │ Stroke   │
+│ Select    │                                       │          │
+│ Color     │                                       │ Transform│
+│ Line      │                                       │          │
+│ Rectangle │                                       │          │
+│ Circle    │                                       │          │
+│ Pen       │                                       │          │
+│           │                                       │          │
+├───────────┴───────────────────────────────────────┴──────────┤
+│ Zoom −   100%   +                         Canvas information │
+└──────────────────────────────────────────────────────────────┘
+
+The layout must be responsive.
+
+On smaller screens, collapse side panels into drawers.
+
+---
+
+5. Top Navigation
+
+Create a compact professional top bar.
+
+Include:
+
+- VectorForge logo
+- File menu
+- Edit menu
+- View menu
+- Undo
+- Redo
+- Zoom
+- Preview
+- Export SVG
+
+Export should be visually prominent but not oversized.
+
+Example:
+
+Export SVG
+
+Dropdown options:
+
+- SVG
+- PNG Preview
+- Copy SVG Code
+
+---
+
+6. Left Tool Panel
+
+Create a vertical professional toolbar.
+
+Tools:
+
+Selection
+
+- Select
+- Direct Select / Node Select
+
+Image Editing
+
+- Brush
+- Eraser
+- Restore
+- Magic Select
+- Color Select
+- Background Remove
+
+Drawing
+
+- Line
+- Freehand
+- Rectangle
+- Circle
+- Polygon
+- Pen
+- Bezier
+
+Editing
+
+- Cut
+- Duplicate
+- Delete
+
+Each tool should have:
+
+- Icon
+- Tooltip
+- Active state
+
+Do not use text labels for every toolbar item.
+
+Use recognizable icons with tooltips.
+
+---
+
+7. Canvas Workspace
+
+The center should contain the primary editing workspace.
+
+Create a large canvas area with:
+
+- Dark neutral background
+- Optional checkerboard transparency grid
+- Zoom controls
+- Pan support
+- Fit-to-screen
+- Actual-size view
+
+The image should remain centered.
+
+Support:
+
+- Mouse
+- Touch
+- Trackpad
+
+The canvas should never feel cramped.
+
+When editing raster data, use HTML Canvas.
+
+When editing the final vector representation, use SVG.
+
+Do not attempt to use SVG for raster painting operations.
+
+---
+
+8. Image Editing Mode
+
+Before vectorization, allow the user to clean the image.
+
+The editor should support:
+
+Eraser
+
+Allow users to erase unwanted portions of the image.
+
+Controls:
+
+- Brush size
+- Hardness
+- Opacity
+- Feather
+
+Restore
+
+Restore previously erased areas.
+
+Brush
+
+Allow simple raster painting.
+
+Background Removal
+
+Provide:
+
+Automatic
+
+Automatically detect and remove the background.
+
+Manual
+
+Allow the user to paint over areas that should be removed.
+
+Color Removal
+
+Allow the user to click a color and remove similar pixels.
+
+Controls:
+
+- Tolerance
+- Feather
+- Similarity
+
+---
+
+9. Smart Preprocessing
+
+Before vectorization, provide a preprocessing panel.
+
+Controls should include:
+
+Threshold
+
+Convert image toward a clean binary representation.
+
+Smoothing
+
+Reduce small pixel noise.
+
+Detail
+
+Control how much visual detail is preserved.
+
+Simplification
+
+Reduce unnecessary points in the generated paths.
+
+Color Count
+
+Allow:
+
+- 2 colors
+- 4 colors
+- 8 colors
+- 16 colors
+- 32 colors
+- Custom
+
+Edge Strength
+
+Control edge detection.
+
+Noise Removal
+
+Remove tiny unwanted regions.
+
+Background Detection
+
+Automatic background identification.
+
+Every setting should update the preview when practical.
+
+---
+
+10. Vectorization Modes
+
+This is one of the most important parts of the application.
+
+Give the user a clear mode selector.
+
+Mode 1 — Detailed
+
+Preserve more visual information.
+
+Use more paths and more curves.
+
+Useful for:
+
+- Illustrations
+- Complex graphics
+- Detailed logos
+
+Mode 2 — Normal
+
+The recommended default.
+
+Create clean, simplified SVG paths while maintaining the important shape.
+
+This should be the primary mode.
+
+Mode 3 — Basic Shapes
+
+Attempt to represent the image using simple SVG primitives where appropriate:
+
+- Rectangles
+- Circles
+- Lines
+- Polygons
+- Simple paths
+
+This mode intentionally prioritizes simplicity over pixel-perfect reproduction.
+
+The result should look like a designer reconstructed the image using basic vector geometry.
+
+---
+
+11. SVG Representation
+
+Use clean SVG structure.
+
+Prefer:
+
+<path>
+<circle>
+<rect>
+<line>
+<polygon>
+
+where appropriate.
+
+For complex organic shapes, prefer clean simplified closed paths.
+
+Example conceptual output:
+
+<svg viewBox="0 0 800 600">
+    <path
+        d="..."
+        fill="#111"
+    />
+</svg>
+
+Avoid producing thousands of unnecessary points.
+
+The vectorization system should attempt:
+
+1. Detect regions
+2. Extract contours
+3. Remove noise
+4. Simplify contours
+5. Convert corners/curves appropriately
+6. Generate clean SVG
+7. Preserve editable structure
+
+---
+
+12. SVG Editor
+
+After conversion, switch to SVG editing mode.
+
+The user should be able to select individual SVG elements.
+
+When an element is selected, show a bounding box.
+
+Allow:
+
+- Move
+- Scale
+- Rotate
+- Duplicate
+- Delete
+- Change fill
+- Change stroke
+- Change stroke width
+- Change opacity
+
+For paths, support node editing.
+
+Users should be able to:
+
+- Select nodes
+- Move nodes
+- Add nodes
+- Delete nodes
+- Convert corner to curve
+- Convert curve to corner
+- Simplify path
+
+---
+
+13. Properties Panel
+
+The right sidebar should dynamically show properties for the selected object.
+
+For example:
+
+Transform
+
+X
+Y
+Width
+Height
+Rotation
+
+Appearance
+
+Fill
+Stroke
+Stroke Width
+Opacity
+
+Path
+
+Point count
+Path length
+Simplify
+
+Do not overwhelm the user.
+
+Only show properties relevant to the selected object.
+
+---
+
+14. Layers Panel
+
+Add a Layers section.
+
+Example:
+
+Layers
+
+▾ Group
+   ● Shape 03
+   ● Shape 02
+   ● Shape 01
+
+Allow:
+
+- Select
+- Rename
+- Hide
+- Lock
+- Reorder
+- Delete
+
+Use small visual previews where useful.
+
+---
+
+15. Drawing Mode
+
+The application must also work as a simple SVG drawing tool without requiring an uploaded image.
+
+Provide:
+
+Line
+
+Click and drag to create:
+
+<line>
+
+Rectangle
+
+Create:
+
+<rect>
+
+Circle
+
+Create:
+
+<circle>
+
+Polygon
+
+Create polygons from clicks.
+
+Freehand
+
+Draw naturally with the pointer.
+
+Convert the captured points into a simplified SVG path.
+
+Do NOT create thousands of unnecessary points.
+
+Apply point simplification and curve fitting.
+
+Pen / Bezier
+
+Allow creation of custom paths.
+
+The drawing system should produce proper SVG rather than rasterizing the drawing.
+
+---
+
+16. Before / After Preview
+
+Provide an optional comparison mode.
+
+Example:
+
+Original Image     Generated SVG
+──────────────     ─────────────
+    PNG                 SVG
+
+Allow:
+
+- Side-by-side
+- Split comparison
+- Overlay
+
+Include a draggable comparison divider for the split view.
+
+---
+
+17. SVG Animation Preparation
+
+The SVG architecture should be designed with future animation in mind.
+
+Generated shapes should remain independent SVG elements where practical.
+
+Prefer clean paths.
+
+Paths should be:
+
+- Closed when representing filled regions
+- Simplified
+- Properly structured
+- Individually selectable
+
+This allows future features such as:
+
+- Path drawing animations
+- SVG-to-particle effects
+- Morphing
+- Physics
+- Distortion
+- Interactive particles
+- Canvas conversion
+
+Do not implement the particle system now, but structure the generated SVG so it can support it later.
+
+---
+
+18. Export System
+
+Create a professional export panel.
+
+Options:
+
+SVG
+
+- Optimized SVG
+- Editable SVG
+- Clean SVG
+
+PNG
+
+Allow the user to choose resolution:
+
+- 1x
+- 2x
+- 4x
+
+Allow transparent background.
+
+Also provide:
+
+Copy SVG Code
+
+and optionally:
+
+Download SVG
+
+---
+
+19. Technical Architecture
+
+Use:
+
+Frontend
+
+React
+
+Backend
+
+Node.js + Express
+
+Image Processing
+
+Use JavaScript-compatible image processing libraries.
+
+The architecture should allow more advanced processing to be added later.
+
+Suggested structure:
+
+vectorforge/
+│
+├── client/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Toolbar/
+│   │   │   ├── Canvas/
+│   │   │   ├── Layers/
+│   │   │   ├── Properties/
+│   │   │   ├── Vectorizer/
+│   │   │   ├── Upload/
+│   │   │   └── Export/
+│   │   │
+│   │   ├── editor/
+│   │   ├── canvas/
+│   │   ├── svg/
+│   │   ├── vectorization/
+│   │   ├── hooks/
+│   │   └── utils/
+│   │
+│   └── App.jsx
+│
+├── server/
+│   ├── routes/
+│   │   ├── convert.js
+│   │   └── process.js
+│   │
+│   ├── image/
+│   │   ├── preprocess.js
+│   │   ├── background.js
+│   │   └── segmentation.js
+│   │
+│   ├── vector/
+│   │   ├── contours.js
+│   │   ├── simplify.js
+│   │   ├── bezier.js
+│   │   └── svg.js
+│   │
+│   └── server.js
+│
+└── package.json
+
+---
+
+20. Important Rendering Architecture
+
+Use Canvas for:
+
+- Uploaded raster image
+- Erasing
+- Painting
+- Background removal
+- Pixel manipulation
+- Image preprocessing
+
+Use SVG for:
+
+- Generated vector
+- SVG editing
+- Shapes
+- Paths
+- Nodes
+- Layers
+- Transformations
+
+Do not convert everything into Canvas.
+
+The final vector must remain real editable SVG.
+
+---
+
+21. Performance
+
+The application should feel fast.
+
+Requirements:
+
+- Avoid unnecessary React re-renders
+- Keep high-frequency pointer movement efficient
+- Use requestAnimationFrame where appropriate
+- Debounce expensive vectorization operations
+- Do not recalculate the entire vector when only a visual UI setting changes
+- Use Canvas efficiently
+- Avoid thousands of DOM elements
+- Keep SVG path counts reasonable
+- Simplify paths before rendering
+- Process large images without freezing the interface
+
+For expensive processing, show a clear processing state.
+
+Example:
+
+Analyzing image...
+Extracting shapes...
+Simplifying paths...
+Building SVG...
+
+---
+
+22. Responsive Design
+
+Desktop should be the primary experience.
+
+However, support tablets and mobile devices.
+
+On mobile:
+
+- Left toolbar becomes a bottom toolbar
+- Right properties panel becomes a bottom drawer
+- Layers become a modal/drawer
+- Canvas remains the primary focus
+- Touch gestures should support pan and zoom
+
+Do not simply shrink the desktop UI.
+
+Create a proper responsive workspace.
+
+---
+
+23. Microinteractions
+
+Use subtle professional animations.
+
+Examples:
+
+- Upload area responds to drag-over
+- Tool buttons have subtle active states
+- Panels animate smoothly
+- Selection boxes animate minimally
+- Export button gives feedback
+- Processing state has a subtle animated indicator
+- Tooltips appear naturally
+- Side panels slide smoothly
+
+Animations should be restrained.
+
+Do not add animation everywhere just for decoration.
+
+---
+
+24. Visual Details
+
+Use:
+
+- Strong typographic hierarchy
+- Compact controls
+- Thin separators
+- Subtle borders
+- Consistent iconography
+- Professional spacing
+- Clear active states
+- Carefully designed empty states
+
+Use a restrained color system.
+
+Suggested direction:
+
+- Deep charcoal workspace
+- Slightly lighter panels
+- Neutral text
+- One distinctive accent color
+- Minimal accent usage
+
+Do not make every component colorful.
+
+---
+
+25. Landing Page Visual Concept
+
+Before entering the editor, create a beautiful landing page showing the product concept.
+
+Hero:
+
+Turn pixels into editable shapes.
+
+Supporting text:
+
+Clean, trace, simplify, and transform raster images into production-ready SVG.
+
+Primary CTA:
+
+Start Converting
+
+Secondary CTA:
+
+Draw SVG
+
+Show a visual demonstration of:
+
+RASTER
+   ↓
+CLEAN
+   ↓
+VECTORIZE
+   ↓
+EDIT
+   ↓
+SVG
+
+Use an interactive visual example rather than generic stock photography.
+
+For example, show an image gradually transforming into simplified vector shapes.
+
+---
+
+26. Empty State
+
+When no project is open:
+
+Show:
+
+Create something new
+
+Cards:
+
+Convert Image
+
+Upload PNG, JPG, or WEBP.
+
+Draw SVG
+
+Start with a blank vector canvas.
+
+Open Project
+
+Open an existing project if project persistence is implemented.
+
+Keep this screen minimal.
+
+---
+
+27. Error Handling
+
+Create professional error states.
+
+Examples:
+
+Unsupported format:
+
+This file format isn't supported.
+
+Large image:
+
+This image is larger than recommended. Processing may take longer.
+
+Vectorization failure:
+
+We couldn't detect a usable shape from this image. Try increasing contrast or removing the background.
+
+Never show raw technical errors to normal users.
+
+---
+
+28. Accessibility
+
+Include:
+
+- Keyboard shortcuts
+- Visible focus states
+- ARIA labels
+- Tooltips
+- Good contrast
+- Keyboard navigation
+- Accessible buttons
+- Screen-reader-friendly controls where practical
+
+Suggested shortcuts:
+
+V = Select
+B = Brush
+E = Eraser
+L = Line
+R = Rectangle
+C = Circle
+P = Pen
+Delete = Delete selection
+Ctrl/Cmd + Z = Undo
+Ctrl/Cmd + Shift + Z = Redo
+
+---
+
+29. Undo / Redo System
+
+This is important.
+
+Create an editor history system.
+
+Actions should be undoable:
+
+- Erasing
+- Restoring
+- Drawing
+- Moving
+- Scaling
+- Rotating
+- Changing colors
+- Deleting
+- Creating paths
+- Simplifying paths
+
+Use a command/history architecture rather than manually handling every undo action separately.
+
+---
+
+30. No Database for the First Version
+
+For the initial implementation, do NOT require a database.
+
+The first version should work like:
+
+Upload
+ ↓
+Edit
+ ↓
+Process
+ ↓
+Vectorize
+ ↓
+Edit SVG
+ ↓
+Export
+
+Temporary processing data can be removed after the session.
+
+Design the architecture so a database can be added later for:
+
+- Accounts
+- Saved projects
+- Project history
+- Cloud storage
+- Sharing
+- Collaboration
+- Subscription limits
+
+---
+
+31. Future Architecture
+
+Keep the code modular so advanced processing can later be added.
+
+Possible future architecture:
+
+React
+   ↓
+Express / Node
+   ↓
+Image Processing
+   ↓
+Vectorization
+   ↓
+SVG
+
+Later:
+
+React
+   ↓
+Express
+   ↓
+Processing Router
+   ├── Node image processing
+   ├── Python/OpenCV service
+   └── ML segmentation service
+
+Do not implement the Python/ML service now.
+
+Just make the architecture extensible.
+
+---
+
+32. Important Vectorization Philosophy
+
+The application should NOT simply trace every pixel.
+
+The goal is:
+
+fewer, cleaner, meaningful shapes.
+
+For example:
+
+Bad:
+
+10000 tiny paths
+
+Better:
+
+12 meaningful paths
+
+The system should intelligently balance:
+
+Accuracy ↔ Simplicity
+
+The Normal mode should aim for the best balance.
+
+---
+
+33. UI State
+
+The interface should clearly communicate the current mode.
+
+Example top indicator:
+
+IMAGE EDIT
+
+Then:
+
+VECTORIZATION
+
+Then:
+
+SVG EDIT
+
+The user should always understand what they are currently editing.
+
+---
+
+34. Professional Details
+
+Add subtle features that make the application feel real:
+
+- Zoom percentage
+- Canvas dimensions
+- SVG dimensions
+- Object count
+- Path count
+- Processing time
+- File size
+- Transparency indicator
+- Snap-to-grid option
+- Optional grid
+- Rulers if practical
+- Fit selection
+- Fit canvas
+- Reset view
+
+These should not clutter the interface.
+
+Put advanced options behind expandable panels.
+
+---
+
+35. Important UX Principle
+
+Do not make users understand vector graphics before they can use the application.
+
+The basic workflow should be extremely simple:
+
+Upload image
+      ↓
+Clean it
+      ↓
+Choose vectorization mode
+      ↓
+Generate SVG
+      ↓
+Fine-tune
+      ↓
+Export
+
+Advanced controls can appear when the user needs them.
+
+---
+
+36. Build Quality
+
+The generated application should be:
+
+- Fully functional
+- Componentized
+- Maintainable
+- Responsive
+- Fast
+- Accessible
+- Visually polished
+
+Do not create fake buttons.
+
+Do not create static UI pretending to be an editor.
+
+Core interactions should actually work.
+
+If a feature cannot be fully implemented in the first pass, create the architecture and UI cleanly rather than creating a fake result.
+
+---
+
+37. Final Visual Goal
+
+The finished application should feel like:
+
+A professional vector laboratory for turning raster images into clean editable SVG.
+
+It should look sophisticated enough that a frontend developer would believe it was designed and engineered as a real product.
+
+Prioritize:
+
+Design quality + interaction quality + clean architecture + real functionality
+
+over adding unnecessary features.
+
+Build the interface with a strong visual hierarchy and make the actual editor the centerpiece of the product.

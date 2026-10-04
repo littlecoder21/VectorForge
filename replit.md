@@ -1,6 +1,6 @@
-# [Project name]
+# VectorForge
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+VectorForge turns local raster images into editable SVG artwork and provides a responsive workspace for drawing and refining vectors.
 
 ## Run & Operate
 
@@ -22,19 +22,22 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/vectorforge/` — the VectorForge web app.
+- `artifacts/api-server/` — shared API server scaffold; VectorForge does not currently depend on it.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The initial VectorForge workflow runs locally in the browser; it does not require accounts, a database, or cloud image uploads.
+- Raster editing uses Canvas; generated and hand-drawn artwork remains editable SVG.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Upload PNG, JPG, and WEBP artwork, vectorize, edit SVG shapes, draw, and export SVG or PNG.
+- Prioritize a compact, touch-friendly mobile workspace as well as desktop editing.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Keep the editor mobile-first and responsive to small screens.
 
 ## Gotchas
 
