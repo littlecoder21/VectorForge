@@ -38,7 +38,8 @@ function App() {
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [pngScale, setPngScale] = useState(1);
   const [transparentPng, setTransparentPng] = useState(true);
-  const [sheet, setSheet] = useState<'layers' | 'properties' | 'trace' | null>(null);
+  const [sheet, setSheet] = useState<'layers' | 'properties' | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState('');
   const activeShape = shapes.find(s => s.id === selected);
@@ -65,7 +66,7 @@ function App() {
       const img = new Image();
       img.onload = () => {
         if (img.naturalWidth * img.naturalHeight > MAX_IMAGE_PIXELS) { setMessage('This image has more than 16 megapixels. Choose a smaller image to avoid slowing down your device.'); return; }
-        setImageUrl(src); setImageName(file.name); setImageSize({ width: img.naturalWidth, height: img.naturalHeight }); setShowSource(true); setShapes([]); setSelected(null); setHasVectorResult(false); setLastTraceSettings(null); history.current = [{ shapes: [], selected: null }]; historyAt.current = 0;
+        setImageUrl(src); setImageName(file.name); setImageSize({ width: img.naturalWidth, height: img.naturalHeight }); setShowSource(true); setShapes([]); setSelected(null); setHasVectorResult(false); setLastTraceSettings(null); setDrawerOpen(false); history.current = [{ shapes: [], selected: null }]; historyAt.current = 0;
       };
       img.onerror = () => setMessage('That image could not be opened.');
       img.src = src;
@@ -139,6 +140,7 @@ function App() {
       if (nextTool) {
         setTool(nextTool);
         setSheet(null);
+        setDrawerOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -341,7 +343,7 @@ function App() {
       {editing && <><button className="btn btn-quiet icon-btn" aria-label="Undo" data-testid="button-undo" disabled={historyAt.current <= 0} onClick={undo}><Undo2 size={16} /></button><button className="btn btn-quiet icon-btn" aria-label="Redo" data-testid="button-redo" disabled={historyAt.current >= history.current.length - 1} onClick={redo}><Redo2 size={16} /></button></>}
       {shapes.length > 0 && <><button className="btn" aria-label="Copy SVG code" data-testid="button-copy-svg" onClick={() => void copySvg()}><Copy size={13} /><span>Copy SVG</span></button><button className="btn" aria-label="Download PNG" title="Download PNG" data-testid="button-export-png" onClick={() => void exportFile('png')}><FileImage size={14} /><span>PNG</span></button><button className="btn btn-primary" aria-label="Download SVG" data-testid="button-export-svg" onClick={() => void exportFile('svg')}><Download size={14} /><span>SVG</span></button></>}
       {!editing && <button className="btn" aria-label="Choose another image" onClick={() => fileRef.current?.click()}><ImagePlus size={14} /><span>Choose image</span></button>}
-      <button className={`btn edit-mode-toggle ${editing ? '' : 'btn-primary'}`} aria-label={editing ? 'Back to converter' : 'Open vector editor'} disabled={!editing && !hasVectorResult} onClick={() => { setEditing(!editing); setSheet(null); }}>{editing ? <><Undo2 size={13} /><span>Back</span></> : <><Layers size={13} /><span>Edit</span></>}</button>
+      <button className={`btn edit-mode-toggle ${editing ? '' : 'btn-primary'}`} aria-label={editing ? 'Back to converter' : 'Open vector editor'} disabled={!editing && !hasVectorResult} onClick={() => { setEditing(!editing); setSheet(null); setDrawerOpen(false); }}>{editing ? <><Undo2 size={13} /><span>Back</span></> : <><Layers size={13} /><span>Edit</span></>}</button>
     </div></header>
     {!editing && converterView}
     {!editing && dragging && <div className="converter-drop-overlay">Drop image to open locally</div>}
@@ -367,13 +369,14 @@ function App() {
       <aside className="panel panel-right"><div style={{ borderBottom: '1px solid #2c3038' }}>{layersPanel}</div>{propertiesPanel}</aside>
     </div>
     <nav className="mobile-dock" aria-label="Mobile workspace tools">
-      <button className={`dock-item ${tool === 'select' ? 'active' : ''}`} data-testid="mobile-tool-select" onClick={() => { setTool('select'); setSheet(null); }}><MousePointer2 size={18} />Select</button>
-      <button className={`dock-item ${tool === 'brush' ? 'active' : ''}`} data-testid="mobile-tool-draw" onClick={() => { setTool('brush'); setSheet(null); }}><Brush size={18} />Draw</button>
-      <button className="dock-item" data-testid="mobile-open-layers" onClick={() => setSheet('layers')}><Layers size={18} />Layers</button>
-      <button className="dock-item" data-testid="mobile-open-trace" onClick={() => setSheet('trace')}><ScanLine size={18} />Trace</button>
-      <button className="dock-item" data-testid="mobile-open-properties" onClick={() => setSheet('properties')}><Settings2 size={18} />Edit</button>
+      <button className={`dock-item ${tool === 'select' ? 'active' : ''}`} data-testid="mobile-tool-select" onClick={() => { setTool('select'); setSheet(null); setDrawerOpen(false); }}><MousePointer2 size={18} />Select</button>
+      <button className={`dock-item ${tool === 'brush' ? 'active' : ''}`} data-testid="mobile-tool-draw" onClick={() => { setTool('brush'); setSheet(null); setDrawerOpen(false); }}><Brush size={18} />Draw</button>
+      <button className={`dock-item ${sheet === 'layers' ? 'active' : ''}`} data-testid="mobile-open-layers" onClick={() => { setDrawerOpen(false); setSheet(current => current === 'layers' ? null : 'layers'); }}><Layers size={18} />Layers</button>
+      <button className={`dock-item ${drawerOpen ? 'active' : ''}`} aria-label="Open image and trace controls" aria-expanded={drawerOpen} aria-controls="image-trace-drawer" data-testid="mobile-open-trace" onClick={() => { setSheet(null); setDrawerOpen(open => !open); }}><ScanLine size={18} />Trace</button>
+      <button className={`dock-item ${sheet === 'properties' ? 'active' : ''}`} data-testid="mobile-open-properties" onClick={() => { setDrawerOpen(false); setSheet(current => current === 'properties' ? null : 'properties'); }}><Settings2 size={18} />Edit</button>
     </nav>
-    {sheet && <><div className="backdrop" onClick={() => setSheet(null)} /><section className="mobile-sheet"><div className="sheet-grip" /><div className="panel-head"><span>{sheet === 'layers' ? 'Layers & shapes' : sheet === 'trace' ? 'Source & tracing' : 'Shape properties'}</span><button className="tool-btn" aria-label="Close panel" onClick={() => setSheet(null)}><X size={16} /></button></div>{sheet === 'layers' ? <>{layersPanel}<div className="panel-content"><button className="btn" disabled={!activeShape} onClick={duplicateSelected}><Copy size={14} />Duplicate</button><button className="btn" disabled={!activeShape} style={{ marginLeft: 7 }} onClick={deleteSelected}><Trash2 size={14} />Delete</button></div></> : sheet === 'trace' ? uploadPanel : propertiesPanel}</section></>}
+    {drawerOpen && <><div className="backdrop drawer-backdrop" onClick={() => setDrawerOpen(false)} /><aside id="image-trace-drawer" className="panel panel-left mobile-sidebar-drawer" aria-label="Image and trace controls"><div className="panel-head"><span>Image & trace</span><button className="tool-btn" aria-label="Close image and trace drawer" onClick={() => setDrawerOpen(false)}><X size={16} /></button></div>{uploadPanel}</aside></>}
+    {sheet && <><div className="backdrop" onClick={() => setSheet(null)} /><section className="mobile-sheet"><div className="sheet-grip" /><div className="panel-head"><span>{sheet === 'layers' ? 'Layers & shapes' : 'Shape properties'}</span><button className="tool-btn" aria-label="Close panel" onClick={() => setSheet(null)}><X size={16} /></button></div>{sheet === 'layers' ? <>{layersPanel}<div className="panel-content"><button className="btn" disabled={!activeShape} onClick={duplicateSelected}><Copy size={14} />Duplicate</button><button className="btn" disabled={!activeShape} style={{ marginLeft: 7 }} onClick={deleteSelected}><Trash2 size={14} />Delete</button></div></> : propertiesPanel}</section></>}
     </>}
     {message && <div role="status" data-testid="status-message" style={{ position: 'fixed', zIndex: 30, bottom: 78, left: '50%', transform: 'translateX(-50%)', background: '#292d33', color: '#eee8da', border: '1px solid #5a4b32', borderRadius: 7, padding: '10px 15px', fontSize: 12, boxShadow: '0 6px 26px #0007', maxWidth: '90vw' }}>{message}</div>}
   </main>;
