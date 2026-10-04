@@ -68,7 +68,16 @@ function simplifyLoop(points: Point[], epsilon: number): Point[] {
   return simplified.length >= 3 ? simplified : points;
 }
 
-function outlineRegion(pixels: number[], palette: Int32Array, width: number, height: number, color: number, epsilon: number): string {
+function outlineRegion(
+  pixels: number[],
+  palette: Int32Array,
+  width: number,
+  height: number,
+  color: number,
+  epsilon: number,
+  scaleX: number,
+  scaleY: number,
+): string {
   const edges: Edge[] = [];
   const outgoing = new Map<string, number[]>();
   const addEdge = (x: number, y: number, x2: number, y2: number, direction: number) => {
@@ -131,7 +140,7 @@ function outlineRegion(pixels: number[], palette: Int32Array, width: number, hei
 
   return loops
     .filter(loop => loop.length >= 3)
-    .map(loop => `M${loop[0].x} ${loop[0].y}${loop.slice(1).map(point => `L${point.x} ${point.y}`).join('')}Z`)
+    .map(loop => `M${(loop[0].x * scaleX).toFixed(2)} ${(loop[0].y * scaleY).toFixed(2)}${loop.slice(1).map(point => `L${(point.x * scaleX).toFixed(2)} ${(point.y * scaleY).toFixed(2)}`).join('')}Z`)
     .join('');
 }
 
@@ -148,6 +157,37 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
   context.drawImage(image, 0, 0, width, height);
 
   const pixels = context.getImageData(0, 0, width, height).data;
+  let monochromeThreshold = 127;
+  if (mode === 'basic') {
+    const histogram = new Uint32Array(256);
+    let count = 0;
+    let weightedTotal = 0;
+    for (let i = 0; i < width * height; i++) {
+      if (pixels[i * 4 + 3] < 40) continue;
+      const luminance = Math.round(pixels[i * 4] * 0.2126 + pixels[i * 4 + 1] * 0.7152 + pixels[i * 4 + 2] * 0.0722);
+      histogram[luminance]++;
+      count++;
+      weightedTotal += luminance;
+    }
+    let backgroundWeight = 0;
+    let backgroundTotal = 0;
+    let bestVariance = -1;
+    for (let value = 0; value < 256; value++) {
+      backgroundWeight += histogram[value];
+      if (backgroundWeight === 0) continue;
+      const foregroundWeight = count - backgroundWeight;
+      if (foregroundWeight === 0) break;
+      backgroundTotal += value * histogram[value];
+      const backgroundMean = backgroundTotal / backgroundWeight;
+      const foregroundMean = (weightedTotal - backgroundTotal) / foregroundWeight;
+      const betweenClassVariance = backgroundWeight * foregroundWeight * (backgroundMean - foregroundMean) ** 2;
+      if (betweenClassVariance > bestVariance) {
+        bestVariance = betweenClassVariance;
+        monochromeThreshold = value;
+      }
+    }
+    monochromeThreshold = Math.max(0, Math.min(255, Math.round(monochromeThreshold + (tolerance - 35) * 1.4)));
+  }
   const baseQuantum = mode === 'detailed' ? 14 : mode === 'normal' ? 27 : 50;
   const quantum = Math.max(8, Math.min(100, Math.round(baseQuantum + tolerance * 0.7)));
   const palette = new Int32Array(width * height);
@@ -157,10 +197,15 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       palette[i] = -1;
       continue;
     }
-    const red = Math.min(255, Math.round(pixels[i * 4] / quantum) * quantum);
-    const green = Math.min(255, Math.round(pixels[i * 4 + 1] / quantum) * quantum);
-    const blue = Math.min(255, Math.round(pixels[i * 4 + 2] / quantum) * quantum);
-    palette[i] = (red << 16) | (green << 8) | blue;
+    if (mode === 'basic') {
+      const luminance = pixels[i * 4] * 0.2126 + pixels[i * 4 + 1] * 0.7152 + pixels[i * 4 + 2] * 0.0722;
+      palette[i] = luminance <= monochromeThreshold ? 0x000000 : 0xffffff;
+    } else {
+      const red = Math.min(255, Math.round(pixels[i * 4] / quantum) * quantum);
+      const green = Math.min(255, Math.round(pixels[i * 4 + 1] / quantum) * quantum);
+      const blue = Math.min(255, Math.round(pixels[i * 4 + 2] / quantum) * quantum);
+      palette[i] = (red << 16) | (green << 8) | blue;
+    }
   }
 
   const seen = new Uint8Array(palette.length);
@@ -201,7 +246,16 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
     }
 
     if (component.length < minimumRegionPixels) continue;
-    const path = outlineRegion(component, palette, width, height, color, simplifyEpsilon);
+    const path = outlineRegion(
+      component,
+      palette,
+      width,
+      height,
+      color,
+      simplifyEpsilon,
+      image.naturalWidth / width,
+      image.naturalHeight / height,
+    );
     if (!path) continue;
     const hex = `#${color.toString(16).padStart(6, '0')}`;
     regions.push({
@@ -210,6 +264,8 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       kind: 'path',
       d: path,
       fill: hex,
+      stroke: mode === 'basic' ? '#111111' : undefined,
+      strokeWidth: mode === 'basic' ? Math.max(0.6, 0.55 * Math.max(image.naturalWidth / width, image.naturalHeight / height)) : undefined,
       fillRule: 'evenodd',
       x: 0,
       y: 0,

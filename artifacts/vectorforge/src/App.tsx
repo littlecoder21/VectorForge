@@ -5,6 +5,7 @@ import { traceImage, type TraceMode, type VectorRegion } from './vectorize';
 type Shape = VectorRegion | { id: string; name: string; kind: 'rect' | 'circle' | 'line'; x: number; y: number; w: number; h: number; fill: string; stroke: string; strokeWidth: number; opacity: number };
 type Tool = 'select' | 'hand' | 'brush' | 'rect' | 'circle' | 'line';
 type Snapshot = { shapes: Shape[]; selected: string | null };
+type TraceSettings = { mode: TraceMode; tolerance: number };
 
 const makeId = () => `shape-${Math.random().toString(36).slice(2, 9)}`;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -22,9 +23,13 @@ function App() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageName, setImageName] = useState('');
   const [imageSize, setImageSize] = useState({ width: 640, height: 420 });
+  const [hasVectorResult, setHasVectorResult] = useState(false);
+  const [lastTraceSettings, setLastTraceSettings] = useState<TraceSettings | null>(null);
+  const [editing, setEditing] = useState(false);
   const [showSource, setShowSource] = useState(true);
   const [traceMode, setTraceMode] = useState<TraceMode>('normal');
   const [tolerance, setTolerance] = useState(22);
+  const lastPreviewSettings = useRef('normal:22');
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -60,14 +65,14 @@ function App() {
       const img = new Image();
       img.onload = () => {
         if (img.naturalWidth * img.naturalHeight > MAX_IMAGE_PIXELS) { setMessage('This image has more than 16 megapixels. Choose a smaller image to avoid slowing down your device.'); return; }
-        setImageUrl(src); setImageName(file.name); setImageSize({ width: img.naturalWidth, height: img.naturalHeight }); setShowSource(true); setShapes([]); setSelected(null); history.current = [{ shapes: [], selected: null }]; historyAt.current = 0;
+        setImageUrl(src); setImageName(file.name); setImageSize({ width: img.naturalWidth, height: img.naturalHeight }); setShowSource(true); setShapes([]); setSelected(null); setHasVectorResult(false); setLastTraceSettings(null); history.current = [{ shapes: [], selected: null }]; historyAt.current = 0;
       };
       img.onerror = () => setMessage('That image could not be opened.');
       img.src = src;
     };
     reader.readAsDataURL(file);
   };
-  const vectorize = async () => {
+  const vectorize = async (silent = false) => {
     if (!imageUrl) { setMessage('Add an image before tracing.'); return; }
     setBusy(true);
     try {
@@ -75,11 +80,21 @@ function App() {
       const result = traceImage(img, traceMode, tolerance);
       setImageSize({ width: result.width, height: result.height });
       commit(result.regions, result.regions[0]?.id ?? null);
+      setHasVectorResult(true);
+      setLastTraceSettings({ mode: traceMode, tolerance });
       setShowSource(false);
-      setMessage(`${result.regions.length} editable regions traced locally.${result.truncated ? ' The 400-region safety limit was reached; use Basic mode or increase color tolerance to reduce detail.' : ''}`);
+      if (!silent) setMessage(`${result.regions.length} editable vector shapes created.${result.truncated ? ' The 400-shape safety limit was reached; use Basic mode or increase color tolerance to reduce detail.' : ''}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not trace this image.'); }
     finally { setBusy(false); }
   };
+  useEffect(() => {
+    const current = `${traceMode}:${tolerance}`;
+    const settingsChanged = current !== lastPreviewSettings.current;
+    lastPreviewSettings.current = current;
+    if (!settingsChanged || !imageUrl || !hasVectorResult || editing) return;
+    const timer = window.setTimeout(() => { void vectorize(true); }, 240);
+    return () => window.clearTimeout(timer);
+  }, [traceMode, tolerance, imageUrl, hasVectorResult, editing]);
   const updateShape = (id: string, patch: Partial<Shape>) => {
     const next = shapes.map(shape => shape.id === id ? { ...shape, ...patch } as Shape : shape);
     history.current = [...history.current.slice(0, historyAt.current + 1), { shapes: next, selected }].slice(-60);
@@ -175,15 +190,14 @@ function App() {
 
   const svgMarkup = useCallback(() => {
     const shapesMarkup = shapes.map(shape => {
-      const selectedStyle = shape.id === selected ? ' vector-selected' : '';
       const attrs = `data-shape-id="${shape.id}" opacity="${shape.opacity}"`;
-      if (shape.kind === 'path') return `<path ${attrs} class="${selectedStyle}" d="${shape.d}" fill="${shape.fill}" fill-rule="${shape.fillRule ?? 'nonzero'}" stroke="${shape.stroke ?? 'none'}" stroke-width="${shape.strokeWidth ?? 0}" transform="translate(${shape.x} ${shape.y})"/>`;
+      if (shape.kind === 'path') return `<path ${attrs} d="${shape.d}" fill="${shape.fill}" fill-rule="${shape.fillRule ?? 'nonzero'}" stroke="${shape.stroke ?? 'none'}" stroke-width="${shape.strokeWidth ?? 0}" transform="translate(${shape.x} ${shape.y})"/>`;
       if (shape.kind === 'rect') return `<rect ${attrs} x="${shape.x}" y="${shape.y}" width="${shape.w}" height="${shape.h}" fill="${shape.fill}" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}"/>`;
       if (shape.kind === 'circle') return `<ellipse ${attrs} cx="${shape.x + shape.w / 2}" cy="${shape.y + shape.h / 2}" rx="${shape.w / 2}" ry="${shape.h / 2}" fill="${shape.fill}" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}"/>`;
       return `<line ${attrs} x1="${shape.x}" y1="${shape.y}" x2="${shape.x + shape.w}" y2="${shape.y + shape.h}" fill="none" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}"/>`;
     }).join('');
-    return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${imageSize.width}" height="${imageSize.height}" viewBox="0 0 ${imageSize.width} ${imageSize.height}">${showSource && imageUrl ? `<image href="${imageUrl}" width="${imageSize.width}" height="${imageSize.height}"/>` : ''}${shapesMarkup}</svg>`;
-  }, [shapes, selected, imageSize, showSource, imageUrl]);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${imageSize.width}" height="${imageSize.height}" viewBox="0 0 ${imageSize.width} ${imageSize.height}">${shapesMarkup}</svg>`;
+  }, [shapes, imageSize]);
   const exportFile = async (type: 'svg' | 'png') => {
     const markup = svgMarkup();
     if (type === 'svg') {
@@ -237,22 +251,38 @@ function App() {
     ctx.putImageData(data, 0, 0); setImageUrl(canvas.toDataURL('image/png')); setMessage('Near-white pixels removed from the source image.');
   };
   const groups = useMemo(() => [...shapes].reverse(), [shapes]);
+  const vectorShapeElements = shapes.map(shape => {
+    const props = {
+      key: shape.id,
+      'data-shape-id': shape.id,
+      opacity: shape.opacity,
+      style: {
+        cursor: editing && tool === 'select' ? 'move' : editing ? 'crosshair' : 'default',
+        touchAction: 'none' as const,
+        ...(editing && shape.id === selected ? { filter: 'drop-shadow(0 0 1.5px #f0bd63)' } : {}),
+      },
+    };
+    if (shape.kind === 'path') return <path {...props} d={shape.d} transform={`translate(${shape.x} ${shape.y})`} fill={shape.fill} fillRule={shape.fillRule ?? 'nonzero'} stroke={shape.stroke ?? 'none'} strokeWidth={shape.strokeWidth ?? 0} />;
+    if (shape.kind === 'rect') return <rect {...props} x={shape.x} y={shape.y} width={shape.w} height={shape.h} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} />;
+    if (shape.kind === 'circle') return <ellipse {...props} cx={shape.x + shape.w / 2} cy={shape.y + shape.h / 2} rx={Math.max(0, shape.w / 2)} ry={Math.max(0, shape.h / 2)} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} />;
+    return <line {...props} x1={shape.x} y1={shape.y} x2={shape.x + shape.w} y2={shape.y + shape.h} stroke={shape.stroke} strokeWidth={shape.strokeWidth} />;
+  });
 
   const uploadPanel = <div className="panel-content">
     <div className="section-label">Source image</div>
     <button className="upload-zone" data-testid="button-upload-image" onClick={() => fileRef.current?.click()}><ImagePlus size={19} style={{ margin: '0 auto 6px' }} /><br />{imageName || 'Choose or drop an image'}<br /><span className="mono" style={{ fontSize: 9 }}>PNG · JPG · WEBP · processed on device</span></button>
     {imageUrl && <><div className="field-row"><span>Preview source</span><input aria-label="Show source image" data-testid="toggle-source-preview" type="checkbox" checked={showSource} onChange={e => setShowSource(e.target.checked)} /></div><button className="btn" style={{ width: '100%' }} onClick={() => void removeLightBackground()}><Eraser size={13} /> Remove near-white background</button><div className="notice">Simple edge-independent white removal. Restore by reselecting the original image.</div></>}
     <div style={{ height: 22 }} /><div className="section-label">Local tracing</div>
-    <div className="mode-grid">{(['basic', 'normal', 'detailed'] as TraceMode[]).map(mode => <button key={mode} title={mode === 'normal' ? 'Recommended balance of detail and simplicity' : `${mode[0].toUpperCase()}${mode.slice(1)} tracing`} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}>{mode[0].toUpperCase() + mode.slice(1)}{mode === 'normal' ? ' ·' : ''}</button>)}</div>
-    <div className="field-row"><label htmlFor="detail-range">Color tolerance</label><span className="small-value">{tolerance}</span></div><input id="detail-range" aria-label="Color tolerance" data-testid="input-color-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
-    <div className="notice">Local color-region tracing. Detailed art can produce many small shapes; smooth curves are not inferred.</div>
+    <div className="mode-grid">{(['basic', 'normal', 'detailed'] as TraceMode[]).map(mode => <button key={mode} title={mode === 'basic' ? 'Two-tone black-and-white vector shapes' : mode === 'normal' ? 'Recommended color trace' : 'More colors and finer detail'} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}><span>{mode === 'basic' ? 'Basic B&W' : mode === 'normal' ? 'Normal' : 'Detailed'}</span><small>{mode === 'basic' ? '2 tones' : mode === 'normal' ? 'Color' : 'More detail'}</small></button>)}</div>
+    <div className="field-row"><label htmlFor="detail-range">{traceMode === 'basic' ? 'B&W threshold' : 'Color tolerance'}</label><span className="small-value">{tolerance}</span></div><input id="detail-range" aria-label={traceMode === 'basic' ? 'Black and white threshold' : 'Color tolerance'} data-testid="input-color-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
+    <div className="notice">{traceMode === 'basic' ? 'Automatic black-and-white threshold trace with black outlines and editable fills.' : 'Local color-region tracing. Normal preserves color; Detailed keeps more regions. Curves are approximated with simplified paths.'}</div>
     <button className="btn btn-primary" data-testid="button-trace-image" style={{ width: '100%', marginTop: 15 }} onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={14} /> {busy ? 'Tracing pixels…' : 'Trace to editable shapes'}</button>
     <div style={{ height: 23 }} /><div className="section-label">Document</div>
     <div className="field-row"><span>Canvas</span><span className="small-value">{imageSize.width} × {imageSize.height}</span></div>
     <div className="section-label" style={{ marginTop: 18 }}>PNG export</div>
     <div className="field-row"><label htmlFor="png-scale">Resolution</label><select id="png-scale" className="control" aria-label="PNG export resolution" value={pngScale} onChange={e => setPngScale(Number(e.target.value))}><option value={1}>1×</option><option value={2}>2×</option><option value={4}>4×</option></select></div>
     <div className="field-row"><label htmlFor="png-transparent">Transparent background</label><input id="png-transparent" aria-label="Transparent PNG background" type="checkbox" checked={transparentPng} onChange={e => setTransparentPng(e.target.checked)} /></div>
-    <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => { setShapes([]); setSelected(null); setImageUrl(null); setImageName(''); setImageSize({ width: 640, height: 420 }); history.current = [{ shapes: [], selected: null }]; historyAt.current = 0; }}>New blank document</button>
+    <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => { setShapes([]); setSelected(null); setImageUrl(null); setImageName(''); setImageSize({ width: 640, height: 420 }); setHasVectorResult(false); setLastTraceSettings(null); setShowSource(true); setPan({ x: 0, y: 0 }); setZoom(100); history.current = [{ shapes: [], selected: null }]; historyAt.current = 0; }}>New blank document</button>
   </div>;
 
   const layersPanel = <><div className="panel-head"><span>Layers <span className="mono" style={{ color: '#838995' }}>{shapes.length}</span></span><button className="tool-btn" aria-label="Duplicate selected shape" data-testid="button-duplicate" disabled={!activeShape} onClick={duplicateSelected}><Copy size={14} /></button></div><div className="panel-content"><div className="layers-list">{groups.map((shape, i) => <button key={shape.id} data-testid={`layer-row-${shape.id}`} className={`layer-row ${selected === shape.id ? 'selected' : ''}`} onClick={() => setSelected(shape.id)}><span className="swatch" style={{ background: shape.fill === 'none' ? 'transparent' : shape.fill, borderColor: shape.stroke || '#555' }} /><span className="layer-name">{shape.name}</span><span className="mono" style={{ fontSize: 9, color: '#7d838d' }}>{groups.length - i}</span></button>)}
@@ -266,13 +296,56 @@ function App() {
     <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={deleteSelected}><Trash2 size={13} /> Delete shape</button>
   </div></> : <><div className="panel-head">Inspector</div><div className="panel-content"><div className="notice">Select a shape on the canvas or in Layers to edit its appearance and position.</div><div className="section-label" style={{ marginTop: 20 }}>Quick style</div><div className="field-row"><span>New fill</span><input aria-label="New shape fill color" data-testid="input-default-fill" type="color" value={fill} onChange={e => setFill(e.target.value)} /></div><div className="field-row"><span>New stroke</span><input aria-label="New shape stroke color" data-testid="input-default-stroke" type="color" value={stroke} onChange={e => setStroke(e.target.value)} /></div><div className="field-row"><span>Stroke width</span><input aria-label="New shape stroke width" type="range" min="0" max="24" value={strokeWidth} onChange={e => setStrokeWidth(Number(e.target.value))} /></div></div></>}</>;
 
+  const converterView = <section className="converter-page">
+    <section className="converter-intro">
+      <div><div className="section-label">Local image to vector</div><h1>Convert an image to editable SVG</h1><p>Choose an image, pick a trace style, and see the original and vector result stacked below. Files stay on this device.</p></div>
+      <span className="local-badge">IN-BROWSER · NO UPLOAD</span>
+    </section>
+    <section className="converter-controls" aria-label="Conversion settings">
+      <div className="converter-upload">
+        <div className="section-label">1. Source image</div>
+        <button className="upload-zone converter-upload-button" data-testid="converter-upload" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><span>{imageName || 'Choose PNG, JPG or WEBP'}</span><small>{imageUrl ? `${imageSize.width} × ${imageSize.height} px` : 'or drop an image anywhere on this page'}</small></button>
+      </div>
+      <div className="converter-settings">
+        <div className="section-label">2. Trace style</div>
+        <div className="mode-grid">{(['basic', 'normal', 'detailed'] as TraceMode[]).map(mode => <button key={mode} title={mode === 'basic' ? 'Two-tone black-and-white vector shapes' : mode === 'normal' ? 'Recommended color trace' : 'More colors and finer detail'} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}><span>{mode === 'basic' ? 'Basic B&W' : mode === 'normal' ? 'Normal' : 'Detailed'}</span><small>{mode === 'basic' ? '2 tones' : mode === 'normal' ? 'Color' : 'More detail'}</small></button>)}</div>
+        <div className="field-row"><label htmlFor="converter-tolerance">{traceMode === 'basic' ? 'B&W threshold' : 'Color tolerance'}</label><span className="small-value">{tolerance}</span></div>
+        <input id="converter-tolerance" aria-label={traceMode === 'basic' ? 'Black and white threshold' : 'Color tolerance'} data-testid="converter-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
+      </div>
+      <div className="converter-action">
+        <div className="section-label">3. Create vectors</div>
+        <p>{traceMode === 'basic' ? 'Black-and-white fills with black outlines.' : traceMode === 'normal' ? 'Color-filled editable vector regions.' : 'More color regions with finer contours.'}</p>
+        <button className="btn btn-primary convert-button" data-testid="button-trace-image" onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={15} />{busy ? 'Converting…' : hasVectorResult ? 'Update vector result' : 'Convert to SVG'}</button>
+      </div>
+    </section>
+    <section className="preview-stack" aria-label="Live before and after preview">
+      <article className="preview-panel">
+        <div className="preview-heading"><div><span className="preview-index">01</span><h2>Original image</h2></div><span className="preview-badge">{imageName || 'SOURCE'}</span></div>
+        <div className="preview-frame">
+          {imageUrl ? <img src={imageUrl} alt="Original image selected for tracing" /> : <div className="preview-placeholder"><FileImage size={23} /><span>Choose an image to see it here</span></div>}
+        </div>
+      </article>
+      <article className="preview-panel">
+        <div className="preview-heading"><div><span className="preview-index">02</span><h2>Converted SVG</h2></div><span className="preview-badge">{hasVectorResult ? `${shapes.length} vector shapes` : 'LIVE PREVIEW'}</span></div>
+        <div className="preview-frame">
+          {hasVectorResult ? <svg className="result-svg" xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${imageSize.width} ${imageSize.height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Converted vector preview">{vectorShapeElements}</svg> : <div className="preview-placeholder">{busy ? <ScanLine size={23} /> : <Shapes size={23} />}<span>{imageUrl ? 'Click “Convert to SVG” to generate editable vector shapes' : 'Your vector result will appear here'}</span></div>}
+        </div>
+        <div className="preview-footer" role="status">{hasVectorResult ? `Vector-only preview · ${lastTraceSettings?.mode === 'basic' ? 'black and white' : 'color'} · ${imageSize.width} × ${imageSize.height} px${lastTraceSettings && (lastTraceSettings.mode !== traceMode || lastTraceSettings.tolerance !== tolerance) ? busy ? ' · updating preview…' : ' · preview updating shortly' : ''}` : 'No source image is included in the exported SVG.'}</div>
+      </article>
+    </section>
+  </section>;
+
   return <main className="app-shell" onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); chooseFile(e.dataTransfer.files[0]); }}>
-    <input className="hidden-input" ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" data-testid="input-image-file" onChange={e => chooseFile(e.target.files?.[0])} />
-    <header className="topbar"><div className="brand"><span className="brand-mark"><Shapes size={16} /></span><span>VectorForge</span></div><span className="topbar-meta">LOCAL VECTOR WORKSPACE <span style={{ color: '#dcb35e' }}> / </span> UNSAVED DOCUMENT</span><div className="top-actions">
-      <button className="btn btn-quiet icon-btn" aria-label="Undo" data-testid="button-undo" disabled={historyAt.current <= 0} onClick={undo}><Undo2 size={16} /></button><button className="btn btn-quiet icon-btn" aria-label="Redo" data-testid="button-redo" disabled={historyAt.current >= history.current.length - 1} onClick={redo}><Redo2 size={16} /></button>
-      <button className="btn" aria-label="Copy SVG code" data-testid="button-copy-svg" onClick={() => void copySvg()}><Copy size={13} /><span>Copy SVG</span></button><button className="btn" aria-label="Download PNG" title="Download PNG" data-testid="button-export-png" onClick={() => void exportFile('png')}><FileImage size={14} /><span>PNG</span></button><button className="btn btn-primary" aria-label="Download SVG" data-testid="button-export-svg" onClick={() => void exportFile('svg')}><Download size={14} /><span>SVG</span></button>
+    <input className="hidden-input" ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" data-testid="input-image-file" onChange={e => { chooseFile(e.target.files?.[0]); e.currentTarget.value = ''; }} />
+    <header className="topbar"><div className="brand"><span className="brand-mark"><Shapes size={16} /></span><span>VectorForge</span></div><span className="topbar-meta">{editing ? 'VECTOR EDITOR' : 'LOCAL IMAGE → SVG CONVERTER'}</span><div className="top-actions">
+      {editing && <><button className="btn btn-quiet icon-btn" aria-label="Undo" data-testid="button-undo" disabled={historyAt.current <= 0} onClick={undo}><Undo2 size={16} /></button><button className="btn btn-quiet icon-btn" aria-label="Redo" data-testid="button-redo" disabled={historyAt.current >= history.current.length - 1} onClick={redo}><Redo2 size={16} /></button></>}
+      {shapes.length > 0 && <><button className="btn" aria-label="Copy SVG code" data-testid="button-copy-svg" onClick={() => void copySvg()}><Copy size={13} /><span>Copy SVG</span></button><button className="btn" aria-label="Download PNG" title="Download PNG" data-testid="button-export-png" onClick={() => void exportFile('png')}><FileImage size={14} /><span>PNG</span></button><button className="btn btn-primary" aria-label="Download SVG" data-testid="button-export-svg" onClick={() => void exportFile('svg')}><Download size={14} /><span>SVG</span></button></>}
+      {!editing && <button className="btn" aria-label="Choose another image" onClick={() => fileRef.current?.click()}><ImagePlus size={14} /><span>Choose image</span></button>}
+      <button className={`btn edit-mode-toggle ${editing ? '' : 'btn-primary'}`} aria-label={editing ? 'Back to converter' : 'Open vector editor'} disabled={!editing && !hasVectorResult} onClick={() => { setEditing(!editing); setSheet(null); }}>{editing ? <><Undo2 size={13} /><span>Back</span></> : <><Layers size={13} /><span>Edit</span></>}</button>
     </div></header>
-    <div className="workspace">
+    {!editing && converterView}
+    {!editing && dragging && <div className="converter-drop-overlay">Drop image to open locally</div>}
+    {editing && <><div className="workspace">
       <aside className="panel panel-left"><div className="panel-head"><span>Image & trace</span><Settings2 size={14} /></div>{uploadPanel}</aside>
       <section className="workspace-center">
         <div className="canvas-toolbar"><div className="toolset">
@@ -282,14 +355,7 @@ function App() {
           <div className="canvas-board" style={{ width: `min(${Math.round(680 * zoom / 100)}px, 88%)`, aspectRatio: `${aspect}`, transform: `translate(${pan.x}px, ${pan.y}px)` }}>
             <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${imageSize.width} ${imageSize.height}`} preserveAspectRatio="none" style={{ touchAction: tool === 'select' ? 'none' : 'none', cursor: tool === 'select' ? 'default' : tool === 'hand' ? 'grab' : 'crosshair' }} onPointerDown={startPointer} onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={endPointer}>
               {showSource && imageUrl && <image href={imageUrl} width={imageSize.width} height={imageSize.height} pointerEvents="none" />}
-              {shapes.map(shape => {
-                const props = { key: shape.id, 'data-shape-id': shape.id, opacity: shape.opacity, style: { cursor: tool === 'select' ? 'move' : 'crosshair', touchAction: 'none' as const } };
-                const outline = shape.id === selected ? { filter: 'drop-shadow(0 0 1.5px #f0bd63)' } : {};
-                if (shape.kind === 'path') return <path {...props} d={shape.d} transform={`translate(${shape.x} ${shape.y})`} fill={shape.fill} stroke={(shape as VectorRegion & { stroke?: string }).stroke ?? 'none'} strokeWidth={(shape as VectorRegion & { strokeWidth?: number }).strokeWidth ?? 0} style={{ ...props.style, ...outline }} />;
-                if (shape.kind === 'rect') return <rect {...props} x={shape.x} y={shape.y} width={shape.w} height={shape.h} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} style={{ ...props.style, ...outline }} />;
-                if (shape.kind === 'circle') return <ellipse {...props} cx={shape.x + shape.w / 2} cy={shape.y + shape.h / 2} rx={Math.max(0, shape.w / 2)} ry={Math.max(0, shape.h / 2)} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} style={{ ...props.style, ...outline }} />;
-                return <line {...props} x1={shape.x} y1={shape.y} x2={shape.x + shape.w} y2={shape.y + shape.h} stroke={shape.stroke} strokeWidth={shape.strokeWidth} style={{ ...props.style, ...outline }} />;
-              })}
+              {vectorShapeElements}
             </svg>
             {!imageUrl && shapes.length === 0 && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}><div className="mono" style={{ color: '#a6a7a2', fontSize: 10, letterSpacing: '.12em' }}>640 × 420 <span style={{ color: '#d3a650' }}>·</span> VECTOR ARTBOARD</div></div>}
           </div>
@@ -308,6 +374,7 @@ function App() {
       <button className="dock-item" data-testid="mobile-open-properties" onClick={() => setSheet('properties')}><Settings2 size={18} />Edit</button>
     </nav>
     {sheet && <><div className="backdrop" onClick={() => setSheet(null)} /><section className="mobile-sheet"><div className="sheet-grip" /><div className="panel-head"><span>{sheet === 'layers' ? 'Layers & shapes' : sheet === 'trace' ? 'Source & tracing' : 'Shape properties'}</span><button className="tool-btn" aria-label="Close panel" onClick={() => setSheet(null)}><X size={16} /></button></div>{sheet === 'layers' ? <>{layersPanel}<div className="panel-content"><button className="btn" disabled={!activeShape} onClick={duplicateSelected}><Copy size={14} />Duplicate</button><button className="btn" disabled={!activeShape} style={{ marginLeft: 7 }} onClick={deleteSelected}><Trash2 size={14} />Delete</button></div></> : sheet === 'trace' ? uploadPanel : propertiesPanel}</section></>}
+    </>}
     {message && <div role="status" data-testid="status-message" style={{ position: 'fixed', zIndex: 30, bottom: 78, left: '50%', transform: 'translateX(-50%)', background: '#292d33', color: '#eee8da', border: '1px solid #5a4b32', borderRadius: 7, padding: '10px 15px', fontSize: 12, boxShadow: '0 6px 26px #0007', maxWidth: '90vw' }}>{message}</div>}
   </main>;
 }
