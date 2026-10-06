@@ -11,7 +11,7 @@ export type VectorRegion = {
   y: number;
   opacity: number;
 };
-export type TraceMode = 'detailed' | 'normal' | 'basic';
+export type TraceMode = 'detailed' | 'normal' | 'basic' | 'max';
 
 type Point = { x: number; y: number };
 type Edge = Point & { x2: number; y2: number; direction: number };
@@ -77,9 +77,12 @@ function outlineRegion(
   epsilon: number,
   scaleX: number,
   scaleY: number,
+  alphaPalette?: Uint8Array,
+  alpha = 255,
 ): string {
   const edges: Edge[] = [];
   const outgoing = new Map<string, number[]>();
+  const matchesRegion = (position: number) => palette[position] === color && (!alphaPalette || alphaPalette[position] === alpha);
   const addEdge = (x: number, y: number, x2: number, y2: number, direction: number) => {
     const index = edges.length;
     edges.push({ x, y, x2, y2, direction });
@@ -92,10 +95,10 @@ function outlineRegion(
   for (const position of pixels) {
     const x = position % width;
     const y = (position / width) | 0;
-    if (y === 0 || palette[position - width] !== color) addEdge(x, y, x + 1, y, 0);
-    if (x === width - 1 || palette[position + 1] !== color) addEdge(x + 1, y, x + 1, y + 1, 1);
-    if (y === height - 1 || palette[position + width] !== color) addEdge(x + 1, y + 1, x, y + 1, 2);
-    if (x === 0 || palette[position - 1] !== color) addEdge(x, y + 1, x, y, 3);
+    if (y === 0 || !matchesRegion(position - width)) addEdge(x, y, x + 1, y, 0);
+    if (x === width - 1 || !matchesRegion(position + 1)) addEdge(x + 1, y, x + 1, y + 1, 1);
+    if (y === height - 1 || !matchesRegion(position + width)) addEdge(x + 1, y + 1, x, y + 1, 2);
+    if (x === 0 || !matchesRegion(position - 1)) addEdge(x, y + 1, x, y, 3);
   }
 
   const used = new Uint8Array(edges.length);
@@ -145,7 +148,7 @@ function outlineRegion(
 }
 
 export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance = 22): TraceResult {
-  const maxSide = mode === 'detailed' ? 280 : mode === 'normal' ? 220 : 128;
+  const maxSide = mode === 'max' ? Math.max(image.naturalWidth, image.naturalHeight) : mode === 'detailed' ? 280 : mode === 'normal' ? 220 : 128;
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
   const height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -157,6 +160,7 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
   context.drawImage(image, 0, 0, width, height);
 
   const pixels = context.getImageData(0, 0, width, height).data;
+  const alphaPalette = mode === 'max' ? new Uint8Array(width * height) : undefined;
   let monochromeThreshold = 127;
   if (mode === 'basic') {
     const histogram = new Uint32Array(256);
@@ -189,14 +193,15 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
     monochromeThreshold = Math.max(0, Math.min(255, Math.round(monochromeThreshold + (tolerance - 35) * 1.4)));
   }
   const baseQuantum = mode === 'detailed' ? 14 : mode === 'normal' ? 27 : 50;
-  const quantum = Math.max(8, Math.min(100, Math.round(baseQuantum + tolerance * 0.7)));
+  const quantum = mode === 'max' ? 1 : Math.max(8, Math.min(100, Math.round(baseQuantum + tolerance * 0.7)));
   const palette = new Int32Array(width * height);
   for (let i = 0; i < palette.length; i++) {
     const alpha = pixels[i * 4 + 3];
-    if (alpha < 40) {
+    if (mode === 'max' ? alpha === 0 : alpha < 40) {
       palette[i] = -1;
       continue;
     }
+    if (alphaPalette) alphaPalette[i] = alpha;
     if (mode === 'basic') {
       const luminance = pixels[i * 4] * 0.2126 + pixels[i * 4 + 1] * 0.7152 + pixels[i * 4 + 2] * 0.0722;
       palette[i] = luminance <= monochromeThreshold ? 0x000000 : 0xffffff;
@@ -210,9 +215,9 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
 
   const seen = new Uint8Array(palette.length);
   const regions: VectorRegion[] = [];
-  const minimumRegionPixels = mode === 'detailed' ? 2 : mode === 'normal' ? 4 : 9;
-  const simplifyEpsilon = mode === 'detailed' ? 0.35 : mode === 'normal' ? 0.8 : 1.6;
-  const maxRegions = 400;
+  const minimumRegionPixels = mode === 'max' ? 1 : mode === 'detailed' ? 2 : mode === 'normal' ? 4 : 9;
+  const simplifyEpsilon = mode === 'max' ? 0 : mode === 'detailed' ? 0.35 : mode === 'normal' ? 0.8 : 1.6;
+  const maxRegions = mode === 'max' ? Number.POSITIVE_INFINITY : 400;
   let truncated = false;
 
   for (let start = 0; start < palette.length; start++) {
@@ -225,6 +230,7 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
 
     const queue = [start];
     const component: number[] = [];
+    const componentAlpha = alphaPalette?.[start] ?? 255;
     seen[start] = 1;
     for (let head = 0; head < queue.length; head++) {
       const position = queue[head];
@@ -238,7 +244,7 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
         y + 1 < height ? position + width : -1,
       ];
       for (const next of neighbors) {
-        if (next >= 0 && !seen[next] && palette[next] === color) {
+        if (next >= 0 && !seen[next] && palette[next] === color && (!alphaPalette || alphaPalette[next] === componentAlpha)) {
           seen[next] = 1;
           queue.push(next);
         }
@@ -255,6 +261,8 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       simplifyEpsilon,
       image.naturalWidth / width,
       image.naturalHeight / height,
+      alphaPalette,
+      componentAlpha,
     );
     if (!path) continue;
     const hex = `#${color.toString(16).padStart(6, '0')}`;
@@ -269,7 +277,7 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       fillRule: 'evenodd',
       x: 0,
       y: 0,
-      opacity: 1,
+      opacity: componentAlpha / 255,
     });
   }
 

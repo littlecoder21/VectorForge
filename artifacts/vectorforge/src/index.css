@@ -77,8 +77,11 @@ button:disabled { cursor:not-allowed; opacity:.4; }
 .upload-zone {border:1px dashed #454a53;border-radius:6px;padding:13px;text-align:center;color:#999faa;font-size:11px;line-height:1.5;cursor:pointer;}
 .upload-zone:hover {border-color:#d9aa56;color:#e5c17d;}
 .mode-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:5px;}
+.profile-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
 .mode-option {background:#242830;border:1px solid #363b44;color:#abb0b8;border-radius:5px;padding:8px 4px;text-align:center;font-size:10px;}
 .mode-option.active {color:#ecc375;border-color:#9c7740;background:#302c24;}
+.submode-label {margin:14px 0 9px;}
+.max-mode-notice {padding:10px 11px;border:1px solid #444039;border-radius:6px;background:#24241f;}
 .mobile-dock {display:none;}
 .backdrop {position:fixed;inset:0;background:#08090bc2;z-index:20;}
 .mobile-sheet {position:fixed;z-index:21;bottom:0;left:0;right:0;max-height:82dvh;overflow:auto;background:#1c1f25;border:1px solid #363a43;border-radius:14px 14px 0 0;padding-bottom:env(safe-area-inset-bottom);}

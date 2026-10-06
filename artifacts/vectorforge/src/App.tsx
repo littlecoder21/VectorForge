@@ -5,7 +5,9 @@ import { traceImage, type TraceMode, type VectorRegion } from './vectorize';
 type Shape = VectorRegion | { id: string; name: string; kind: 'rect' | 'circle' | 'line'; x: number; y: number; w: number; h: number; fill: string; stroke: string; strokeWidth: number; opacity: number };
 type Tool = 'select' | 'hand' | 'brush' | 'rect' | 'circle' | 'line';
 type Snapshot = { shapes: Shape[]; selected: string | null };
-type TraceSettings = { mode: TraceMode; tolerance: number };
+type TraceProfile = 'normal' | 'max';
+type NormalTraceMode = Exclude<TraceMode, 'max'>;
+type TraceSettings = { profile: TraceProfile; mode: TraceMode; tolerance: number };
 
 const makeId = () => `shape-${Math.random().toString(36).slice(2, 9)}`;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -27,9 +29,10 @@ function App() {
   const [lastTraceSettings, setLastTraceSettings] = useState<TraceSettings | null>(null);
   const [editing, setEditing] = useState(false);
   const [showSource, setShowSource] = useState(true);
-  const [traceMode, setTraceMode] = useState<TraceMode>('normal');
+  const [traceProfile, setTraceProfile] = useState<TraceProfile>('normal');
+  const [traceMode, setTraceMode] = useState<NormalTraceMode>('normal');
   const [tolerance, setTolerance] = useState(22);
-  const lastPreviewSettings = useRef('normal:22');
+  const lastPreviewSettings = useRef('normal:normal:22');
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -78,24 +81,25 @@ function App() {
     setBusy(true);
     try {
       const img = new Image(); img.src = imageUrl; await img.decode();
-      const result = traceImage(img, traceMode, tolerance);
+      const mode = traceProfile === 'max' ? 'max' : traceMode;
+      const result = traceImage(img, mode, tolerance);
       setImageSize({ width: result.width, height: result.height });
       commit(result.regions, result.regions[0]?.id ?? null);
       setHasVectorResult(true);
-      setLastTraceSettings({ mode: traceMode, tolerance });
+      setLastTraceSettings({ profile: traceProfile, mode, tolerance });
       setShowSource(false);
-      if (!silent) setMessage(`${result.regions.length} editable vector shapes created.${result.truncated ? ' The 400-shape safety limit was reached; use Basic mode or increase color tolerance to reduce detail.' : ''}`);
+      if (!silent) setMessage(`${result.regions.length} editable vector shapes created.${result.truncated ? ' The 400-shape safety limit applies to Normal mode; Max mode traces without that cap.' : traceProfile === 'max' ? ' Max mode keeps full-resolution colors; large SVGs may take longer to open.' : ''}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not trace this image.'); }
     finally { setBusy(false); }
   };
   useEffect(() => {
-    const current = `${traceMode}:${tolerance}`;
+    const current = traceProfile === 'max' ? 'max' : `normal:${traceMode}:${tolerance}`;
     const settingsChanged = current !== lastPreviewSettings.current;
     lastPreviewSettings.current = current;
     if (!settingsChanged || !imageUrl || !hasVectorResult || editing) return;
     const timer = window.setTimeout(() => { void vectorize(true); }, 240);
     return () => window.clearTimeout(timer);
-  }, [traceMode, tolerance, imageUrl, hasVectorResult, editing]);
+  }, [traceProfile, traceMode, tolerance, imageUrl, hasVectorResult, editing]);
   const updateShape = (id: string, patch: Partial<Shape>) => {
     const next = shapes.map(shape => shape.id === id ? { ...shape, ...patch } as Shape : shape);
     history.current = [...history.current.slice(0, historyAt.current + 1), { shapes: next, selected }].slice(-60);
@@ -275,9 +279,16 @@ function App() {
     <button className="upload-zone" data-testid="button-upload-image" onClick={() => fileRef.current?.click()}><ImagePlus size={19} style={{ margin: '0 auto 6px' }} /><br />{imageName || 'Choose or drop an image'}<br /><span className="mono" style={{ fontSize: 9 }}>PNG · JPG · WEBP · processed on device</span></button>
     {imageUrl && <><div className="field-row"><span>Preview source</span><input aria-label="Show source image" data-testid="toggle-source-preview" type="checkbox" checked={showSource} onChange={e => setShowSource(e.target.checked)} /></div><button className="btn" style={{ width: '100%' }} onClick={() => void removeLightBackground()}><Eraser size={13} /> Remove near-white background</button><div className="notice">Simple edge-independent white removal. Restore by reselecting the original image.</div></>}
     <div style={{ height: 22 }} /><div className="section-label">Local tracing</div>
-    <div className="mode-grid">{(['basic', 'normal', 'detailed'] as TraceMode[]).map(mode => <button key={mode} title={mode === 'basic' ? 'Two-tone black-and-white vector shapes' : mode === 'normal' ? 'Recommended color trace' : 'More colors and finer detail'} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}><span>{mode === 'basic' ? 'Basic B&W' : mode === 'normal' ? 'Normal' : 'Detailed'}</span><small>{mode === 'basic' ? '2 tones' : mode === 'normal' ? 'Color' : 'More detail'}</small></button>)}</div>
-    <div className="field-row"><label htmlFor="detail-range">{traceMode === 'basic' ? 'B&W threshold' : 'Color tolerance'}</label><span className="small-value">{tolerance}</span></div><input id="detail-range" aria-label={traceMode === 'basic' ? 'Black and white threshold' : 'Color tolerance'} data-testid="input-color-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
-    <div className="notice">{traceMode === 'basic' ? 'Automatic black-and-white threshold trace with black outlines and editable fills.' : 'Local color-region tracing. Normal preserves color; Detailed keeps more regions. Curves are approximated with simplified paths.'}</div>
+    <div className="mode-grid profile-grid">
+      <button className={`mode-option ${traceProfile === 'normal' ? 'active' : ''}`} title="Normal tracing with three detail submodes" data-testid="profile-normal" onClick={() => setTraceProfile('normal')}><span>Normal</span><small>3 submodes</small></button>
+      <button className={`mode-option ${traceProfile === 'max' ? 'active' : ''}`} title="Full-resolution exact-color trace without a region cap" data-testid="profile-max" onClick={() => setTraceProfile('max')}><span>Max</span><small>Full detail</small></button>
+    </div>
+    {traceProfile === 'normal' ? <>
+      <div className="section-label" style={{ marginTop: 15 }}>Normal detail</div>
+      <div className="mode-grid">{(['basic', 'normal', 'detailed'] as NormalTraceMode[]).map(mode => <button key={mode} title={mode === 'basic' ? 'Two-tone black-and-white vector shapes' : mode === 'normal' ? 'Reduced-color vector regions' : 'More colors and finer detail'} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}><span>{mode === 'basic' ? 'Basic B&W' : mode === 'normal' ? 'Normal' : 'Detailed'}</span><small>{mode === 'basic' ? '2 tones' : mode === 'normal' ? 'Reduced color' : 'More detail'}</small></button>)}</div>
+      <div className="field-row"><label htmlFor="detail-range">{traceMode === 'basic' ? 'B&W threshold' : 'Color tolerance'}</label><span className="small-value">{tolerance}</span></div><input id="detail-range" aria-label={traceMode === 'basic' ? 'Black and white threshold' : 'Color tolerance'} data-testid="input-color-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
+      <div className="notice">{traceMode === 'basic' ? 'Black-and-white shapes with black outlines.' : traceMode === 'normal' ? 'Reduced-color filled vector regions; not a black-and-white trace.' : 'More color regions with finer contours.'}</div>
+    </> : <div className="notice max-mode-notice">Exact source colors at full resolution. No color tolerance reduction, simplification, or 400-region cap. Large images—especially photos—can take longer and create very large SVGs.</div>}
     <button className="btn btn-primary" data-testid="button-trace-image" style={{ width: '100%', marginTop: 15 }} onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={14} /> {busy ? 'Tracing pixels…' : 'Trace to editable shapes'}</button>
     <div style={{ height: 23 }} /><div className="section-label">Document</div>
     <div className="field-row"><span>Canvas</span><span className="small-value">{imageSize.width} × {imageSize.height}</span></div>
@@ -309,14 +320,21 @@ function App() {
         <button className="upload-zone converter-upload-button" data-testid="converter-upload" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><span>{imageName || 'Choose PNG, JPG or WEBP'}</span><small>{imageUrl ? `${imageSize.width} × ${imageSize.height} px` : 'or drop an image anywhere on this page'}</small></button>
       </div>
       <div className="converter-settings">
-        <div className="section-label">2. Trace style</div>
-        <div className="mode-grid">{(['basic', 'normal', 'detailed'] as TraceMode[]).map(mode => <button key={mode} title={mode === 'basic' ? 'Two-tone black-and-white vector shapes' : mode === 'normal' ? 'Recommended color trace' : 'More colors and finer detail'} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}><span>{mode === 'basic' ? 'Basic B&W' : mode === 'normal' ? 'Normal' : 'Detailed'}</span><small>{mode === 'basic' ? '2 tones' : mode === 'normal' ? 'Color' : 'More detail'}</small></button>)}</div>
-        <div className="field-row"><label htmlFor="converter-tolerance">{traceMode === 'basic' ? 'B&W threshold' : 'Color tolerance'}</label><span className="small-value">{tolerance}</span></div>
-        <input id="converter-tolerance" aria-label={traceMode === 'basic' ? 'Black and white threshold' : 'Color tolerance'} data-testid="converter-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
+        <div className="section-label">2. Trace mode</div>
+        <div className="mode-grid profile-grid">
+          <button className={`mode-option ${traceProfile === 'normal' ? 'active' : ''}`} title="Normal tracing with three detail submodes" data-testid="profile-normal" onClick={() => setTraceProfile('normal')}><span>Normal</span><small>3 submodes</small></button>
+          <button className={`mode-option ${traceProfile === 'max' ? 'active' : ''}`} title="Full-resolution exact-color trace without a region cap" data-testid="profile-max" onClick={() => setTraceProfile('max')}><span>Max</span><small>Full detail</small></button>
+        </div>
+        {traceProfile === 'normal' ? <>
+          <div className="section-label submode-label">Detail preset</div>
+          <div className="mode-grid">{(['basic', 'normal', 'detailed'] as NormalTraceMode[]).map(mode => <button key={mode} title={mode === 'basic' ? 'Two-tone black-and-white vector shapes' : mode === 'normal' ? 'Reduced-color vector regions' : 'More colors and finer detail'} data-testid={`mode-${mode}`} className={`mode-option ${traceMode === mode ? 'active' : ''}`} onClick={() => setTraceMode(mode)}><span>{mode === 'basic' ? 'Basic B&W' : mode === 'normal' ? 'Normal' : 'Detailed'}</span><small>{mode === 'basic' ? '2 tones' : mode === 'normal' ? 'Reduced color' : 'More detail'}</small></button>)}</div>
+          <div className="field-row"><label htmlFor="converter-tolerance">{traceMode === 'basic' ? 'B&W threshold' : 'Color tolerance'}</label><span className="small-value">{tolerance}</span></div>
+          <input id="converter-tolerance" aria-label={traceMode === 'basic' ? 'Black and white threshold' : 'Color tolerance'} data-testid="converter-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
+        </> : <div className="notice max-mode-notice">Exact source colors at full resolution. No tolerance reduction, simplification, or 400-region cap. Large files can take longer to trace.</div>}
       </div>
       <div className="converter-action">
         <div className="section-label">3. Create vectors</div>
-        <p>{traceMode === 'basic' ? 'Black-and-white fills with black outlines.' : traceMode === 'normal' ? 'Color-filled editable vector regions.' : 'More color regions with finer contours.'}</p>
+        <p>{traceProfile === 'max' ? 'Exact-color, full-resolution vector trace with no region cap.' : traceMode === 'basic' ? 'Black-and-white fills with black outlines.' : traceMode === 'normal' ? 'Reduced-color editable vector regions.' : 'More color regions with finer contours.'}</p>
         <button className="btn btn-primary convert-button" data-testid="button-trace-image" onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={15} />{busy ? 'Converting…' : hasVectorResult ? 'Update vector result' : 'Convert to SVG'}</button>
       </div>
     </section>
@@ -332,7 +350,7 @@ function App() {
         <div className="preview-frame">
           {hasVectorResult ? <svg className="result-svg" xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${imageSize.width} ${imageSize.height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Converted vector preview">{vectorShapeElements}</svg> : <div className="preview-placeholder">{busy ? <ScanLine size={23} /> : <Shapes size={23} />}<span>{imageUrl ? 'Click “Convert to SVG” to generate editable vector shapes' : 'Your vector result will appear here'}</span></div>}
         </div>
-        <div className="preview-footer" role="status">{hasVectorResult ? `Vector-only preview · ${lastTraceSettings?.mode === 'basic' ? 'black and white' : 'color'} · ${imageSize.width} × ${imageSize.height} px${lastTraceSettings && (lastTraceSettings.mode !== traceMode || lastTraceSettings.tolerance !== tolerance) ? busy ? ' · updating preview…' : ' · preview updating shortly' : ''}` : 'No source image is included in the exported SVG.'}</div>
+        <div className="preview-footer" role="status">{hasVectorResult ? `Vector-only preview · ${lastTraceSettings?.profile === 'max' ? 'max fidelity, exact colors' : lastTraceSettings?.mode === 'basic' ? 'black and white' : 'reduced-color'} · ${imageSize.width} × ${imageSize.height} px${lastTraceSettings && (lastTraceSettings.profile !== traceProfile || (traceProfile === 'normal' && (lastTraceSettings.mode !== traceMode || lastTraceSettings.tolerance !== tolerance))) ? busy ? ' · updating preview…' : ' · preview updating shortly' : ''}` : 'No source image is included in the exported SVG.'}</div>
       </article>
     </section>
   </section>;
