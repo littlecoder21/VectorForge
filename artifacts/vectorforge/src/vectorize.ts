@@ -15,7 +15,7 @@ export type TraceMode = 'stroke' | 'stroke-fill' | 'grayscale' | 'max';
 
 type Point = { x: number; y: number };
 type Edge = Point & { x2: number; y2: number; direction: number };
-type TraceResult = { regions: VectorRegion[]; width: number; height: number; truncated: boolean };
+export type TraceResult = { regions: VectorRegion[]; width: number; height: number; truncated: boolean };
 
 function simplifyOpenPath(points: Point[], epsilon: number): Point[] {
   if (points.length <= 2) return points;
@@ -147,12 +147,21 @@ function outlineRegion(
     .join('');
 }
 
-export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance = 22): TraceResult {
-  const maxSide = mode === 'max' ? Math.max(image.naturalWidth, image.naturalHeight) : mode === 'grayscale' ? 280 : 220;
-  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-  const width = Math.max(1, Math.round(image.naturalWidth * scale));
-  const height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const canvas = document.createElement('canvas');
+export function traceImage(
+  image: HTMLImageElement | ImageBitmap,
+  mode: TraceMode,
+  tolerance = 22,
+  onProgress?: (progress: number) => void,
+): TraceResult {
+  const naturalWidth = 'naturalWidth' in image ? image.naturalWidth : image.width;
+  const naturalHeight = 'naturalHeight' in image ? image.naturalHeight : image.height;
+  const maxSide = mode === 'max' ? 1600 : mode === 'grayscale' ? 280 : 220;
+  const scale = Math.min(1, maxSide / Math.max(naturalWidth, naturalHeight));
+  const width = Math.max(1, Math.round(naturalWidth * scale));
+  const height = Math.max(1, Math.round(naturalHeight * scale));
+  const canvas = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(width, height)
+    : document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext('2d', { willReadFrequently: true });
@@ -162,7 +171,7 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
   const pixels = context.getImageData(0, 0, width, height).data;
   const alphaPalette = mode === 'max' ? new Uint8Array(width * height) : undefined;
   const baseQuantum = mode === 'grayscale' ? Math.max(8, Math.min(36, Math.round(8 + tolerance * 0.36))) : 27;
-  const quantum = mode === 'max' ? 1 : Math.max(8, Math.min(100, Math.round(baseQuantum + (mode === 'grayscale' ? 0 : tolerance * 0.7))));
+  const quantum = mode === 'max' ? 18 : Math.max(8, Math.min(100, Math.round(baseQuantum + (mode === 'grayscale' ? 0 : tolerance * 0.7))));
   const palette = new Int32Array(width * height);
   for (let i = 0; i < palette.length; i++) {
     const alpha = pixels[i * 4 + 3];
@@ -185,12 +194,20 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
 
   const seen = new Uint8Array(palette.length);
   const regions: VectorRegion[] = [];
-  const minimumRegionPixels = mode === 'max' || mode === 'grayscale' ? 1 : 4;
-  const simplifyEpsilon = mode === 'max' ? 0 : mode === 'grayscale' ? 0.35 : 0.8;
-  const maxRegions = mode === 'max' ? Number.POSITIVE_INFINITY : 400;
+  const minimumRegionPixels = mode === 'grayscale' ? 1 : mode === 'max' ? 3 : 4;
+  const simplifyEpsilon = mode === 'max' ? 0.85 : mode === 'grayscale' ? 0.35 : 0.8;
+  const maxRegions = mode === 'max' ? 3000 : 400;
   let truncated = false;
+  let lastProgress = 0;
+  const matchesComponent = (position: number, color: number, alpha: number) =>
+    position >= 0 && !seen[position] && palette[position] === color && (!alphaPalette || alphaPalette[position] === alpha);
+  onProgress?.(0);
 
   for (let start = 0; start < palette.length; start++) {
+    if (onProgress && start > 0 && start % 65536 === 0) {
+      lastProgress = Math.max(lastProgress, Math.min(0.95, (start / palette.length) * 0.95));
+      onProgress(lastProgress);
+    }
     const color = palette[start];
     if (seen[start] || color < 0) continue;
     if (regions.length >= maxRegions) {
@@ -198,39 +215,49 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       break;
     }
 
+    const x = start % width;
+    const y = (start / width) | 0;
+    const alpha = alphaPalette?.[start] ?? 255;
+    if (mode === 'max' &&
+      !matchesComponent(x > 0 ? start - 1 : -1, color, alpha) &&
+      !matchesComponent(x + 1 < width ? start + 1 : -1, color, alpha) &&
+      !matchesComponent(y > 0 ? start - width : -1, color, alpha) &&
+      !matchesComponent(y + 1 < height ? start + width : -1, color, alpha)) {
+      seen[start] = 1;
+      continue;
+    }
+
     const queue = [start];
-    const component: number[] = [];
     const componentAlpha = alphaPalette?.[start] ?? 255;
     seen[start] = 1;
     for (let head = 0; head < queue.length; head++) {
       const position = queue[head];
-      component.push(position);
-      const x = position % width;
-      const y = (position / width) | 0;
-      const neighbors = [
-        x > 0 ? position - 1 : -1,
-        x + 1 < width ? position + 1 : -1,
-        y > 0 ? position - width : -1,
-        y + 1 < height ? position + width : -1,
-      ];
-      for (const next of neighbors) {
-        if (next >= 0 && !seen[next] && palette[next] === color && (!alphaPalette || alphaPalette[next] === componentAlpha)) {
-          seen[next] = 1;
-          queue.push(next);
-        }
+      const currentX = position % width;
+      const currentY = (position / width) | 0;
+      const left = currentX > 0 ? position - 1 : -1;
+      if (matchesComponent(left, color, componentAlpha)) { seen[left] = 1; queue.push(left); }
+      const right = currentX + 1 < width ? position + 1 : -1;
+      if (matchesComponent(right, color, componentAlpha)) { seen[right] = 1; queue.push(right); }
+      const up = currentY > 0 ? position - width : -1;
+      if (matchesComponent(up, color, componentAlpha)) { seen[up] = 1; queue.push(up); }
+      const down = currentY + 1 < height ? position + width : -1;
+      if (matchesComponent(down, color, componentAlpha)) { seen[down] = 1; queue.push(down); }
+      if (onProgress && (head & 0x7fff) === 0 && queue.length > 32768) {
+        lastProgress = Math.max(lastProgress, Math.min(0.95, (head / palette.length) * 0.95));
+        onProgress(lastProgress);
       }
     }
 
-    if (component.length < minimumRegionPixels) continue;
+    if (queue.length < minimumRegionPixels) continue;
     const path = outlineRegion(
-      component,
+      queue,
       palette,
       width,
       height,
       color,
       simplifyEpsilon,
-      image.naturalWidth / width,
-      image.naturalHeight / height,
+      naturalWidth / width,
+      naturalHeight / height,
       alphaPalette,
       componentAlpha,
     );
@@ -243,7 +270,7 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       d: path,
       fill: mode === 'stroke' ? 'none' : hex,
       stroke: mode === 'stroke' || mode === 'stroke-fill' ? '#111111' : undefined,
-      strokeWidth: mode === 'stroke' || mode === 'stroke-fill' ? Math.max(0.6, 0.55 * Math.max(image.naturalWidth / width, image.naturalHeight / height)) : undefined,
+      strokeWidth: mode === 'stroke' || mode === 'stroke-fill' ? Math.max(0.6, 0.55 * Math.max(naturalWidth / width, naturalHeight / height)) : undefined,
       fillRule: 'evenodd',
       x: 0,
       y: 0,
@@ -251,5 +278,6 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
     });
   }
 
-  return { regions, width: image.naturalWidth, height: image.naturalHeight, truncated };
+  onProgress?.(1);
+  return { regions, width: naturalWidth, height: naturalHeight, truncated };
 }

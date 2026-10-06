@@ -1,0 +1,1 @@
+- [Max tracing tradeoff](vectorforge-max-tracing.md) — Max prioritizes responsive, editable high-detail vectors over pixel-exact photo reproduction.

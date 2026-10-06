@@ -1,6 +1,6 @@
 import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Brush, Circle, Copy, Download, Eraser, FileImage, Hand, ImagePlus, Layers, Maximize2, Minus, MousePointer2, Redo2, ScanLine, Settings2, Shapes, Square, Trash2, Undo2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { traceImage, type TraceMode, type VectorRegion } from './vectorize';
+import { traceImage, type TraceMode, type TraceResult, type VectorRegion } from './vectorize';
 
 type Shape = VectorRegion | { id: string; name: string; kind: 'rect' | 'circle' | 'line'; x: number; y: number; w: number; h: number; fill: string; stroke: string; strokeWidth: number; opacity: number };
 type Tool = 'select' | 'hand' | 'brush' | 'rect' | 'circle' | 'line';
@@ -13,6 +13,45 @@ const normalModeOptions: { mode: NormalTraceMode; label: string; detail: string;
   { mode: 'stroke-fill', label: 'Stroke + Fill', detail: 'Color fills', title: 'Fill color regions and outline them with dark strokes' },
   { mode: 'grayscale', label: 'Grayscale fills', detail: 'Black to white', title: 'Use black, white, and gray fills to preserve tonal depth' },
 ];
+
+async function traceMaxInWorker(image: HTMLImageElement, onProgress: (progress: number) => void): Promise<TraceResult> {
+  if (typeof createImageBitmap !== 'function') throw new Error('Background tracing is unavailable in this browser.');
+  const bitmap = await createImageBitmap(image);
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL('./vectorize.worker.ts', import.meta.url), { type: 'module' });
+    } catch (error) {
+      bitmap.close();
+      reject(error);
+      return;
+    }
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      callback();
+    };
+    worker.onmessage = (event: MessageEvent<
+      | { type: 'progress'; progress: number }
+      | { type: 'result'; result: TraceResult }
+      | { type: 'error'; message: string }
+    >) => {
+      const message = event.data;
+      if (message.type === 'progress') onProgress(message.progress);
+      else if (message.type === 'result') finish(() => resolve(message.result));
+      else finish(() => reject(new Error(message.message)));
+    };
+    worker.onerror = event => finish(() => reject(new Error(event.message || 'Background tracing failed.')));
+    try {
+      worker.postMessage({ image: bitmap }, [bitmap]);
+    } catch (error) {
+      bitmap.close();
+      finish(() => reject(error));
+    }
+  });
+}
 
 const makeId = () => `shape-${Math.random().toString(36).slice(2, 9)}`;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -37,8 +76,9 @@ function App() {
   const [traceProfile, setTraceProfile] = useState<TraceProfile>('normal');
   const [traceMode, setTraceMode] = useState<NormalTraceMode>('stroke-fill');
   const [tolerance, setTolerance] = useState(22);
-  const lastPreviewSettings = useRef('normal:normal:22');
+  const lastPreviewSettings = useRef('normal:stroke-fill:22');
   const [busy, setBusy] = useState(false);
+  const [traceProgress, setTraceProgress] = useState<number | null>(null);
   const [zoom, setZoom] = useState(100);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fill, setFill] = useState('#dcae5c');
@@ -84,19 +124,25 @@ function App() {
   };
   const vectorize = async (silent = false) => {
     if (!imageUrl) { setMessage('Add an image before tracing.'); return; }
+    const mode = traceProfile === 'max' ? 'max' : traceMode;
     setBusy(true);
+    setTraceProgress(mode === 'max' ? 0 : null);
     try {
       const img = new Image(); img.src = imageUrl; await img.decode();
-      const mode = traceProfile === 'max' ? 'max' : traceMode;
-      const result = traceImage(img, mode, tolerance);
+      const result = mode === 'max'
+        ? await traceMaxInWorker(img, setTraceProgress)
+        : traceImage(img, mode, tolerance);
       setImageSize({ width: result.width, height: result.height });
       commit(result.regions, result.regions[0]?.id ?? null);
       setHasVectorResult(true);
       setLastTraceSettings({ profile: traceProfile, mode, tolerance });
       setShowSource(false);
-      if (!silent) setMessage(`${result.regions.length} editable vector shapes created.${result.truncated ? ' The 400-shape safety limit applies to Normal mode; Max mode traces without that cap.' : traceProfile === 'max' ? ' Max mode keeps full-resolution colors; large SVGs may take longer to open.' : ''}`);
+      const limitMessage = result.truncated
+        ? mode === 'max' ? ' Max reached its 3,000-region safety limit.' : ' Normal reached its 400-region limit; increase tolerance to reduce detail.'
+        : mode === 'max' ? ' Max groups close colors and ignores tiny regions to keep the SVG manageable.' : '';
+      if (!silent) setMessage(`${result.regions.length} editable vector shapes created.${limitMessage}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not trace this image.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setTraceProgress(null); }
   };
   useEffect(() => {
     const current = traceProfile === 'max' ? 'max' : `normal:${traceMode}:${tolerance}`;
@@ -282,20 +328,20 @@ function App() {
 
   const uploadPanel = <div className="panel-content">
     <div className="section-label">Source image</div>
-    <button className="upload-zone" data-testid="button-upload-image" onClick={() => fileRef.current?.click()}><ImagePlus size={19} style={{ margin: '0 auto 6px' }} /><br />{imageName || 'Choose or drop an image'}<br /><span className="mono" style={{ fontSize: 9 }}>PNG · JPG · WEBP · processed on device</span></button>
+    <button className="upload-zone" data-testid="button-upload-image" onClick={() => fileRef.current?.click()} disabled={busy}><ImagePlus size={19} style={{ margin: '0 auto 6px' }} /><br />{imageName || 'Choose or drop an image'}<br /><span className="mono" style={{ fontSize: 9 }}>PNG · JPG · WEBP · processed on device</span></button>
     {imageUrl && <><div className="field-row"><span>Preview source</span><input aria-label="Show source image" data-testid="toggle-source-preview" type="checkbox" checked={showSource} onChange={e => setShowSource(e.target.checked)} /></div><button className="btn" style={{ width: '100%' }} onClick={() => void removeLightBackground()}><Eraser size={13} /> Remove near-white background</button><div className="notice">Simple edge-independent white removal. Restore by reselecting the original image.</div></>}
     <div style={{ height: 22 }} /><div className="section-label">Local tracing</div>
     <div className="mode-grid profile-grid">
-      <button className={`mode-option ${traceProfile === 'normal' ? 'active' : ''}`} title="Normal tracing with three detail submodes" data-testid="profile-normal" onClick={() => setTraceProfile('normal')}><span>Normal</span><small>3 submodes</small></button>
-      <button className={`mode-option ${traceProfile === 'max' ? 'active' : ''}`} title="Temporarily paused while we choose a safe output for complex images" data-testid="profile-max" disabled><span>Max</span><small>Fixing</small></button>
+      <button className={`mode-option ${traceProfile === 'normal' ? 'active' : ''}`} title="Normal tracing with three detail submodes" data-testid="profile-normal" onClick={() => setTraceProfile('normal')} disabled={busy}><span>Normal</span><small>3 submodes</small></button>
+      <button className={`mode-option ${traceProfile === 'max' ? 'active' : ''}`} title="High-detail editable vector trace, with a practical complexity ceiling" data-testid="profile-max" onClick={() => setTraceProfile('max')} disabled={busy}><span>Max</span><small>High detail</small></button>
     </div>
     {traceProfile === 'normal' ? <>
       <div className="section-label" style={{ marginTop: 15 }}>Normal detail</div>
-      <div className="mode-grid">{normalModeOptions.map(option => <button key={option.mode} title={option.title} data-testid={`mode-${option.mode}`} className={`mode-option ${traceMode === option.mode ? 'active' : ''}`} onClick={() => setTraceMode(option.mode)}><span>{option.label}</span><small>{option.detail}</small></button>)}</div>
-      <div className="field-row"><label htmlFor="detail-range">{traceControlLabel}</label><span className="small-value">{tolerance}</span></div><input id="detail-range" aria-label={traceControlLabel} data-testid="input-color-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
+      <div className="mode-grid">{normalModeOptions.map(option => <button key={option.mode} title={option.title} data-testid={`mode-${option.mode}`} className={`mode-option ${traceMode === option.mode ? 'active' : ''}`} onClick={() => setTraceMode(option.mode)} disabled={busy}><span>{option.label}</span><small>{option.detail}</small></button>)}</div>
+      <div className="field-row"><label htmlFor="detail-range">{traceControlLabel}</label><span className="small-value">{tolerance}</span></div><input id="detail-range" aria-label={traceControlLabel} data-testid="input-color-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} disabled={busy} />
       <div className="notice">{traceMode === 'stroke' ? 'Dark outlines trace region boundaries; the interiors remain unfilled.' : traceMode === 'stroke-fill' ? 'Color-filled vector regions with dark outlines.' : 'Black, white, and gray vector fills preserve more tonal depth than a silhouette.'}</div>
-    </> : <div className="notice max-mode-notice">Exact source colors at full resolution. No color tolerance reduction, simplification, or 400-region cap. Large images—especially photos—can take longer and create very large SVGs.</div>}
-    <button className="btn btn-primary" data-testid="button-trace-image" style={{ width: '100%', marginTop: 15 }} onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={14} /> {busy ? 'Tracing pixels…' : 'Trace to editable shapes'}</button>
+    </> : <div className="notice max-mode-notice">High-detail editable vectors run in the background. Max traces up to 1,600 px on the longest edge and keeps at most 3,000 regions; close colors, tiny regions, and fine contour noise may be simplified.</div>}
+    <button className="btn btn-primary" data-testid="button-trace-image" style={{ width: '100%', marginTop: 15 }} onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={14} /> {busy ? traceProgress === null ? 'Tracing…' : `Tracing ${Math.round(traceProgress * 100)}%…` : 'Trace to editable shapes'}</button>
     <div style={{ height: 23 }} /><div className="section-label">Document</div>
     <div className="field-row"><span>Canvas</span><span className="small-value">{imageSize.width} × {imageSize.height}</span></div>
     <div className="section-label" style={{ marginTop: 18 }}>PNG export</div>
@@ -323,25 +369,25 @@ function App() {
     <section className="converter-controls" aria-label="Conversion settings">
       <div className="converter-upload">
         <div className="section-label">1. Source image</div>
-        <button className="upload-zone converter-upload-button" data-testid="converter-upload" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><span>{imageName || 'Choose PNG, JPG or WEBP'}</span><small>{imageUrl ? `${imageSize.width} × ${imageSize.height} px` : 'or drop an image anywhere on this page'}</small></button>
+        <button className="upload-zone converter-upload-button" data-testid="converter-upload" onClick={() => fileRef.current?.click()} disabled={busy}><ImagePlus size={20} /><span>{imageName || 'Choose PNG, JPG or WEBP'}</span><small>{imageUrl ? `${imageSize.width} × ${imageSize.height} px` : 'or drop an image anywhere on this page'}</small></button>
       </div>
       <div className="converter-settings">
         <div className="section-label">2. Trace mode</div>
         <div className="mode-grid profile-grid">
-          <button className={`mode-option ${traceProfile === 'normal' ? 'active' : ''}`} title="Normal tracing with three detail submodes" data-testid="profile-normal" onClick={() => setTraceProfile('normal')}><span>Normal</span><small>3 submodes</small></button>
-          <button className={`mode-option ${traceProfile === 'max' ? 'active' : ''}`} title="Temporarily paused while we choose a safe output for complex images" data-testid="profile-max" disabled><span>Max</span><small>Fixing</small></button>
+          <button className={`mode-option ${traceProfile === 'normal' ? 'active' : ''}`} title="Normal tracing with three detail submodes" data-testid="profile-normal" onClick={() => setTraceProfile('normal')} disabled={busy}><span>Normal</span><small>3 submodes</small></button>
+          <button className={`mode-option ${traceProfile === 'max' ? 'active' : ''}`} title="High-detail editable vector trace, with a practical complexity ceiling" data-testid="profile-max" onClick={() => setTraceProfile('max')} disabled={busy}><span>Max</span><small>High detail</small></button>
         </div>
         {traceProfile === 'normal' ? <>
           <div className="section-label submode-label">Detail preset</div>
-          <div className="mode-grid">{normalModeOptions.map(option => <button key={option.mode} title={option.title} data-testid={`mode-${option.mode}`} className={`mode-option ${traceMode === option.mode ? 'active' : ''}`} onClick={() => setTraceMode(option.mode)}><span>{option.label}</span><small>{option.detail}</small></button>)}</div>
+          <div className="mode-grid">{normalModeOptions.map(option => <button key={option.mode} title={option.title} data-testid={`mode-${option.mode}`} className={`mode-option ${traceMode === option.mode ? 'active' : ''}`} onClick={() => setTraceMode(option.mode)} disabled={busy}><span>{option.label}</span><small>{option.detail}</small></button>)}</div>
           <div className="field-row"><label htmlFor="converter-tolerance">{traceControlLabel}</label><span className="small-value">{tolerance}</span></div>
-          <input id="converter-tolerance" aria-label={traceControlLabel} data-testid="converter-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} />
-        </> : <div className="notice max-mode-notice">Exact source colors at full resolution. No tolerance reduction, simplification, or 400-region cap. Large files can take longer to trace.</div>}
+          <input id="converter-tolerance" aria-label={traceControlLabel} data-testid="converter-tolerance" style={{ width: '100%', accentColor: '#e6b45c' }} type="range" min="0" max="70" value={tolerance} onChange={e => setTolerance(Number(e.target.value))} disabled={busy} />
+        </> : <div className="notice max-mode-notice">Background trace at up to 1,600 px on the longest edge, with a 3,000-region ceiling. Close colors and tiny contour details may be simplified.</div>}
       </div>
       <div className="converter-action">
         <div className="section-label">3. Create vectors</div>
-        <p>{traceProfile === 'max' ? 'Exact-color, full-resolution vector trace with no region cap.' : traceMode === 'stroke' ? 'Outline only; the interiors stay transparent.' : traceMode === 'stroke-fill' ? 'Color-filled editable vectors with dark outlines.' : 'Black, white, and gray fills with tonal depth and fine detail.'}</p>
-        <button className="btn btn-primary convert-button" data-testid="button-trace-image" onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={15} />{busy ? 'Converting…' : hasVectorResult ? 'Update vector result' : 'Convert to SVG'}</button>
+        <p>{traceProfile === 'max' ? 'High-detail editable vectors, processed in the background with a complexity ceiling.' : traceMode === 'stroke' ? 'Outline only; the interiors stay transparent.' : traceMode === 'stroke-fill' ? 'Color-filled editable vectors with dark outlines.' : 'Black, white, and gray fills with tonal depth and fine detail.'}</p>
+        <button className="btn btn-primary convert-button" data-testid="button-trace-image" onClick={() => void vectorize()} disabled={!imageUrl || busy}><ScanLine size={15} />{busy ? traceProgress === null ? 'Converting…' : `Tracing ${Math.round(traceProgress * 100)}%…` : hasVectorResult ? 'Update vector result' : 'Convert to SVG'}</button>
       </div>
     </section>
     <section className="preview-stack" aria-label="Live before and after preview">
@@ -356,13 +402,13 @@ function App() {
         <div className="preview-frame">
           {hasVectorResult ? <svg className="result-svg" xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${imageSize.width} ${imageSize.height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Converted vector preview">{vectorShapeElements}</svg> : <div className="preview-placeholder">{busy ? <ScanLine size={23} /> : <Shapes size={23} />}<span>{imageUrl ? 'Click “Convert to SVG” to generate editable vector shapes' : 'Your vector result will appear here'}</span></div>}
         </div>
-        <div className="preview-footer" role="status">{hasVectorResult ? `Vector-only preview · ${lastTraceSettings?.profile === 'max' ? 'max fidelity, exact colors' : lastTraceSettings?.mode === 'stroke' ? 'strokes only' : lastTraceSettings?.mode === 'stroke-fill' ? 'stroke + color fill' : 'grayscale fills'} · ${imageSize.width} × ${imageSize.height} px${lastTraceSettings && (lastTraceSettings.profile !== traceProfile || (traceProfile === 'normal' && (lastTraceSettings.mode !== traceMode || lastTraceSettings.tolerance !== tolerance))) ? busy ? ' · updating preview…' : ' · preview updating shortly' : ''}` : 'No source image is included in the exported SVG.'}</div>
+        <div className="preview-footer" role="status">{hasVectorResult ? `Vector-only preview · ${lastTraceSettings?.profile === 'max' ? 'high-detail vector' : lastTraceSettings?.mode === 'stroke' ? 'strokes only' : lastTraceSettings?.mode === 'stroke-fill' ? 'stroke + color fill' : 'grayscale fills'} · ${imageSize.width} × ${imageSize.height} px${lastTraceSettings && (lastTraceSettings.profile !== traceProfile || (traceProfile === 'normal' && (lastTraceSettings.mode !== traceMode || lastTraceSettings.tolerance !== tolerance))) ? busy ? ' · updating preview…' : ' · preview updating shortly' : ''}` : 'No source image is included in the exported SVG.'}</div>
       </article>
     </section>
   </section>;
 
   return <main className="app-shell" onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); chooseFile(e.dataTransfer.files[0]); }}>
-    <input className="hidden-input" ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" data-testid="input-image-file" onChange={e => { chooseFile(e.target.files?.[0]); e.currentTarget.value = ''; }} />
+    <input className="hidden-input" ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" data-testid="input-image-file" onChange={e => { chooseFile(e.target.files?.[0]); e.currentTarget.value = ''; }} disabled={busy} />
     <header className="topbar"><div className="brand"><span className="brand-mark"><Shapes size={16} /></span><span>VectorForge</span></div><span className="topbar-meta">{editing ? 'VECTOR EDITOR' : 'LOCAL IMAGE → SVG CONVERTER'}</span><div className="top-actions">
       {editing && <><button className="btn btn-quiet icon-btn" aria-label="Undo" data-testid="button-undo" disabled={historyAt.current <= 0} onClick={undo}><Undo2 size={16} /></button><button className="btn btn-quiet icon-btn" aria-label="Redo" data-testid="button-redo" disabled={historyAt.current >= history.current.length - 1} onClick={redo}><Redo2 size={16} /></button></>}
       {shapes.length > 0 && <><button className="btn" aria-label="Copy SVG code" data-testid="button-copy-svg" onClick={() => void copySvg()}><Copy size={13} /><span>Copy SVG</span></button><button className="btn" aria-label="Download PNG" title="Download PNG" data-testid="button-export-png" onClick={() => void exportFile('png')}><FileImage size={14} /><span>PNG</span></button><button className="btn btn-primary" aria-label="Download SVG" data-testid="button-export-svg" onClick={() => void exportFile('svg')}><Download size={14} /><span>SVG</span></button></>}
