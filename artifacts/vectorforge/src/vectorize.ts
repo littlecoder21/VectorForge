@@ -11,7 +11,7 @@ export type VectorRegion = {
   y: number;
   opacity: number;
 };
-export type TraceMode = 'detailed' | 'normal' | 'basic' | 'max';
+export type TraceMode = 'stroke' | 'stroke-fill' | 'grayscale' | 'max';
 
 type Point = { x: number; y: number };
 type Edge = Point & { x2: number; y2: number; direction: number };
@@ -148,7 +148,7 @@ function outlineRegion(
 }
 
 export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance = 22): TraceResult {
-  const maxSide = mode === 'max' ? Math.max(image.naturalWidth, image.naturalHeight) : mode === 'detailed' ? 280 : mode === 'normal' ? 220 : 128;
+  const maxSide = mode === 'max' ? Math.max(image.naturalWidth, image.naturalHeight) : mode === 'grayscale' ? 280 : 220;
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
   const height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -161,39 +161,8 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
 
   const pixels = context.getImageData(0, 0, width, height).data;
   const alphaPalette = mode === 'max' ? new Uint8Array(width * height) : undefined;
-  let monochromeThreshold = 127;
-  if (mode === 'basic') {
-    const histogram = new Uint32Array(256);
-    let count = 0;
-    let weightedTotal = 0;
-    for (let i = 0; i < width * height; i++) {
-      if (pixels[i * 4 + 3] < 40) continue;
-      const luminance = Math.round(pixels[i * 4] * 0.2126 + pixels[i * 4 + 1] * 0.7152 + pixels[i * 4 + 2] * 0.0722);
-      histogram[luminance]++;
-      count++;
-      weightedTotal += luminance;
-    }
-    let backgroundWeight = 0;
-    let backgroundTotal = 0;
-    let bestVariance = -1;
-    for (let value = 0; value < 256; value++) {
-      backgroundWeight += histogram[value];
-      if (backgroundWeight === 0) continue;
-      const foregroundWeight = count - backgroundWeight;
-      if (foregroundWeight === 0) break;
-      backgroundTotal += value * histogram[value];
-      const backgroundMean = backgroundTotal / backgroundWeight;
-      const foregroundMean = (weightedTotal - backgroundTotal) / foregroundWeight;
-      const betweenClassVariance = backgroundWeight * foregroundWeight * (backgroundMean - foregroundMean) ** 2;
-      if (betweenClassVariance > bestVariance) {
-        bestVariance = betweenClassVariance;
-        monochromeThreshold = value;
-      }
-    }
-    monochromeThreshold = Math.max(0, Math.min(255, Math.round(monochromeThreshold + (tolerance - 35) * 1.4)));
-  }
-  const baseQuantum = mode === 'detailed' ? 14 : mode === 'normal' ? 27 : 50;
-  const quantum = mode === 'max' ? 1 : Math.max(8, Math.min(100, Math.round(baseQuantum + tolerance * 0.7)));
+  const baseQuantum = mode === 'grayscale' ? Math.max(8, Math.min(36, Math.round(8 + tolerance * 0.36))) : 27;
+  const quantum = mode === 'max' ? 1 : Math.max(8, Math.min(100, Math.round(baseQuantum + (mode === 'grayscale' ? 0 : tolerance * 0.7))));
   const palette = new Int32Array(width * height);
   for (let i = 0; i < palette.length; i++) {
     const alpha = pixels[i * 4 + 3];
@@ -202,9 +171,10 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       continue;
     }
     if (alphaPalette) alphaPalette[i] = alpha;
-    if (mode === 'basic') {
+    if (mode === 'grayscale') {
       const luminance = pixels[i * 4] * 0.2126 + pixels[i * 4 + 1] * 0.7152 + pixels[i * 4 + 2] * 0.0722;
-      palette[i] = luminance <= monochromeThreshold ? 0x000000 : 0xffffff;
+      const gray = Math.min(255, Math.round(luminance / quantum) * quantum);
+      palette[i] = (gray << 16) | (gray << 8) | gray;
     } else {
       const red = Math.min(255, Math.round(pixels[i * 4] / quantum) * quantum);
       const green = Math.min(255, Math.round(pixels[i * 4 + 1] / quantum) * quantum);
@@ -215,8 +185,8 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
 
   const seen = new Uint8Array(palette.length);
   const regions: VectorRegion[] = [];
-  const minimumRegionPixels = mode === 'max' ? 1 : mode === 'detailed' ? 2 : mode === 'normal' ? 4 : 9;
-  const simplifyEpsilon = mode === 'max' ? 0 : mode === 'detailed' ? 0.35 : mode === 'normal' ? 0.8 : 1.6;
+  const minimumRegionPixels = mode === 'max' || mode === 'grayscale' ? 1 : 4;
+  const simplifyEpsilon = mode === 'max' ? 0 : mode === 'grayscale' ? 0.35 : 0.8;
   const maxRegions = mode === 'max' ? Number.POSITIVE_INFINITY : 400;
   let truncated = false;
 
@@ -271,9 +241,9 @@ export function traceImage(image: HTMLImageElement, mode: TraceMode, tolerance =
       name: `Region ${regions.length + 1}`,
       kind: 'path',
       d: path,
-      fill: hex,
-      stroke: mode === 'basic' ? '#111111' : undefined,
-      strokeWidth: mode === 'basic' ? Math.max(0.6, 0.55 * Math.max(image.naturalWidth / width, image.naturalHeight / height)) : undefined,
+      fill: mode === 'stroke' ? 'none' : hex,
+      stroke: mode === 'stroke' || mode === 'stroke-fill' ? '#111111' : undefined,
+      strokeWidth: mode === 'stroke' || mode === 'stroke-fill' ? Math.max(0.6, 0.55 * Math.max(image.naturalWidth / width, image.naturalHeight / height)) : undefined,
       fillRule: 'evenodd',
       x: 0,
       y: 0,
