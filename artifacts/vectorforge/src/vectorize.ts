@@ -12,6 +12,7 @@ export type VectorRegion = {
   opacity: number;
 };
 export type TraceMode = 'stroke' | 'stroke-fill' | 'grayscale' | 'max';
+export type TraceOptions = { maxRegions?: number; onProgress?: (progress: number) => void };
 
 type Point = { x: number; y: number };
 type Edge = Point & { x2: number; y2: number; direction: number };
@@ -150,9 +151,9 @@ function outlineRegion(
 export function traceImage(
   image: HTMLImageElement | ImageBitmap,
   mode: TraceMode,
-  tolerance = 22,
-  onProgress?: (progress: number) => void,
+  options: TraceOptions = {},
 ): TraceResult {
+  const { onProgress } = options;
   const naturalWidth = 'naturalWidth' in image ? image.naturalWidth : image.width;
   const naturalHeight = 'naturalHeight' in image ? image.naturalHeight : image.height;
   const maxSide = mode === 'max' ? 1600 : mode === 'grayscale' ? 280 : 220;
@@ -170,8 +171,7 @@ export function traceImage(
 
   const pixels = context.getImageData(0, 0, width, height).data;
   const alphaPalette = mode === 'max' ? new Uint8Array(width * height) : undefined;
-  const baseQuantum = mode === 'grayscale' ? Math.max(8, Math.min(36, Math.round(8 + tolerance * 0.36))) : 27;
-  const quantum = mode === 'max' ? 18 : Math.max(8, Math.min(100, Math.round(baseQuantum + (mode === 'grayscale' ? 0 : tolerance * 0.7))));
+  const quantum = mode === 'max' ? 18 : mode === 'grayscale' ? 16 : 1;
   const palette = new Int32Array(width * height);
   for (let i = 0; i < palette.length; i++) {
     const alpha = pixels[i * 4 + 3];
@@ -194,9 +194,14 @@ export function traceImage(
 
   const seen = new Uint8Array(palette.length);
   const regions: VectorRegion[] = [];
-  const minimumRegionPixels = mode === 'grayscale' ? 1 : mode === 'max' ? 3 : 4;
+  const minimumRegionPixels = mode === 'max' ? 3 : 1;
   const simplifyEpsilon = mode === 'max' ? 0.85 : mode === 'grayscale' ? 0.35 : 0.8;
-  const maxRegions = mode === 'max' ? 3000 : 400;
+  const configuredLimit = options.maxRegions;
+  const maxRegions = mode === 'max'
+    ? 3000
+    : typeof configuredLimit === 'number' && Number.isFinite(configuredLimit)
+      ? Math.max(1, Math.min(100000, Math.floor(configuredLimit)))
+      : Number.POSITIVE_INFINITY;
   let truncated = false;
   let lastProgress = 0;
   const matchesComponent = (position: number, color: number, alpha: number) =>
